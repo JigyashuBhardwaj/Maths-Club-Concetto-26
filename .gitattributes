@@ -1,0 +1,6 @@
+# Keep line endings identical on Windows and Linux so patches always apply cleanly.
+* text=auto eol=lf
+*.png binary
+*.webp binary
+*.woff2 binary
+*.ico binary

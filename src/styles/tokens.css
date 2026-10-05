@@ -1,0 +1,39 @@
+/*
+ * Design tokens — derived 1:1 from the supplied landing page (Mathematics Club Portal).
+ * `@theme static` emits every variable even when no utility uses it yet, so the
+ * hand-written CSS (landing.css) and Tailwind utilities share one source of truth.
+ */
+@theme static {
+  --color-bg: #050507;
+  --color-orange: #ff6a1a;
+  --color-orange-soft: rgb(255 106 26 / 0.55);
+  --color-ink: #f4eee8;
+  --color-ink-dim: rgb(244 238 232 / 0.62);
+  --color-glass: rgb(16 16 22 / 0.46);
+  --color-line: rgb(255 255 255 / 0.09);
+
+  --font-sans: var(--font-manrope), system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --ease-portal: cubic-bezier(0.22, 0.8, 0.24, 1);
+
+  --radius-panel: 18px;
+  --radius-row: 12px;
+
+  --shadow-panel:
+    0 30px 80px -20px rgb(0 0 0 / 0.8), 0 0 60px -18px var(--color-orange-soft),
+    inset 0 1px 0 rgb(255 255 255 / 0.07);
+}
+
+/* Short aliases used by landing.css (names match the supplied prototype). */
+:root {
+  --bg: var(--color-bg);
+  --orange: var(--color-orange);
+  --orange-soft: var(--color-orange-soft);
+  --ink: var(--color-ink);
+  --ink-dim: var(--color-ink-dim);
+  --glass: var(--color-glass);
+  --line: var(--color-line);
+  --ease: var(--ease-portal);
+  --px: 0;
+  --py: 0;
+}

@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# testing
+coverage/
+playwright-report/
+test-results/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# environment files (only the template .env.example is committed)
+.env*
+!.env.example
+
+# deployment
+.vercel
+
+# OS
+.DS_Store
