@@ -2,7 +2,7 @@
   "name": "maths-club-concetto-26",
   "version": "0.1.0",
   "private": true,
-  "description": "Maths Club IIT (ISM) Dhanbad \u2014 Concetto 26 competition portal",
+  "description": "Maths Club IIT (ISM) Dhanbad — Concetto 26 competition portal",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -18,12 +18,14 @@
     "hygiene:fix": "node scripts/hygiene.mjs --fix",
     "db:verify": "node scripts/db-verify.mjs",
     "db:evidence": "node scripts/db-evidence.mjs",
+    "provision:superadmin": "node scripts/provision-superadmin.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run hygiene"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.117.2",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "next": "16.3.8",

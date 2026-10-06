@@ -50,7 +50,7 @@ Claude workspace repo ──patch+notes──▶ human review ──apply──�
 | `SUPABASE_JWT_SECRET` (or signing key, per Supabase's current scheme) | **server only** | **yes** | Minting short-lived Realtime tokens |
 | `SESSION_TOKEN_PEPPER` | server only | yes | HMAC pepper when hashing session tokens |
 | `SUPABASE_DB_URL` | CI / local only | yes | Migrations and DB tests (never in the app runtime) |
-| `SUPERADMIN_USERNAME`, `SUPERADMIN_PASSWORD` | operator's shell, **one-off** | yes | `provision:superadmin` only; never stored in Vercel or Git |
+| `PROVISION_DATABASE_URL` | operator's shell, **one-off** | yes | `provision:superadmin` only (direct PostgreSQL URL of the database owner); never stored in Vercel or Git. The Super Admin's username and password are typed at the prompt, never in the environment |
 
 `.env.example` documents names without values. The build fails if a `NEXT_PUBLIC_*` variable has a name containing `SECRET`, `SERVICE` or `JWT`.
 

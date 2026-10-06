@@ -1,17 +1,18 @@
 # Database foundation (Patch B)
 
 What exists: ordered PostgreSQL/Supabase migrations, a deterministic development seed, database tests, and a generated
-reviewer copy of the schema. What does **not** exist: any competition engine operation, authentication, realtime,
-admin UI, or new participant UI. The tables are ready for those later phases; nothing here decides game rules in
+reviewer copy of the schema. Migration 11 (Patch B9) adds the authentication and session functions (below). What does
+**not** exist: any competition engine operation, realtime, admin UI, or new participant UI. The tables are ready for those later phases; nothing here decides game rules in
 TypeScript.
 
 ## Layout
 
 ```
-supabase/migrations/   10 ordered migrations (extensions+enums+clock … security/RLS, buy-time options)
+supabase/migrations/   11 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions)
 supabase/seed.sql      configuration + content only: 1 competition, 10 themes A–J, 50 questions, 150 buy-time options, 100 hints, placeholder keys
 supabase/tests/        plain-SQL tests (assert / rejects()); run by scripts/db-verify.mjs
 scripts/db-verify.mjs  scratch-database runner (npm run db:verify)
+scripts/provision-superadmin.mjs  one-off interactive Super Admin creation (npm run provision:superadmin)
 scripts/db-evidence.mjs generates docs/evidence/schema.sql from the migrations (npm run db:evidence)
 tests/unit/db-foundation.test.ts  static guards that run in `npm test` (no database needed)
 ```
@@ -56,6 +57,25 @@ Row level security is enabled **and forced** on every table with **no policies**
 enforce ownership: participant → own team, admin → teams with `teams.admin_id` = self, super admin → all. The service
 role cannot update or delete the audit trail or the coin ledger.
 
+## Authentication functions (migration 11, Patch B9)
+
+All are executable by `service_role` only: each has an explicit `REVOKE ALL … FROM PUBLIC, anon, authenticated` and
+`GRANT EXECUTE … TO service_role` (no reliance on default privileges; proven from the catalog in `70_auth.test.sql`).
+Failures are returned as `{"ok": false, "code": …}` rather than raised, so throttle and audit rows commit.
+
+| Function                                                                                                        | Purpose                                                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public.participant_login(login_id, password, admission_no, token_hash, ip, user_agent)`                        | throttle check → team + bcrypt check → admission belongs to the team → competition `RUNNING`/`PAUSED` → supersede the member's live session → insert session (12 h) → clear throttle → audit `MEMBER_LOGIN`. Never touches the team timer |
+| `public.staff_login(username, password, token_hash, ip, user_agent)`                                            | same pattern for `ADMIN` / `SUPER_ADMIN`; inactive accounts get the generic failure; audit `STAFF_LOGIN`                                                                                                                                  |
+| `public.resolve_session(token_hash)`                                                                            | returns the principal; revokes expired sessions (`EXPIRED`) and sessions of disabled staff (`ADMIN_DISABLED`); sets `last_seen_at = app.now()`                                                                                            |
+| `public.revoke_session(token_hash)`                                                                             | idempotent logout (`LOGOUT`), audits only a real revoke                                                                                                                                                                                   |
+| `app.provision_superadmin(username, display_name, password)`                                                    | creates the single `SUPER_ADMIN`, hashing in the database; raises `SUPER_ADMIN_EXISTS` if one exists                                                                                                                                      |
+| `app.hash_password`, `app.verify_password`, `app.auth_dummy_hash`, `app.auth_throttle_retry_after/_fail/_clear` | helpers (bcrypt cost 12 via pgcrypto; per-account throttle)                                                                                                                                                                               |
+
+The clock is `app.now()` throughout, so tests move time with the existing test clock. There is deliberately **no**
+production function that changes the competition status yet: `70_auth.test.sql` sets `RUNNING`/`PAUSED`/`SETUP`/`ENDED`
+directly in test setup.
+
 ## Deviations and decisions
 
 - **Sessions:** the approved design (decision A2) has one `sessions` table. `member_sessions`, `admin_sessions` and
@@ -72,8 +92,9 @@ role cannot update or delete the audit trail or the coin ledger.
 
 - Not implemented: every engine operation (`start_team_competition`, `unlock_theme`, `start_question`, `buy_hint`,
   `buy_time`, `submit`, approve/disapprove, `final_submit`, reset/disqualify), `compute_team_score`, the sweeper, the leaderboard
-  refresh, authentication, realtime and its `realtime.messages` policy.
-- Verified on plain PostgreSQL 16 only. Supabase-specific behaviour (platform-created roles, default privileges,
+  refresh, `set_competition_status`, the login UI and route guards, realtime and its `realtime.messages` policy.
+- Unknown-account throttle rows (`auth_throttle`) are kept until a purge job exists (a later patch).
+- Verified on plain PostgreSQL 16 and 18 (Linux). Supabase-specific behaviour (platform-created roles, default privileges,
   Data API exposure of the `public` schema, the `realtime` schema) has not been exercised.
 - The participant home and question page still show the static mock timer from the layout image (03:46:54), which is longer
   than the 2-hour timer. It is a UI mock value removed when the real timer is wired in; it was left untouched on purpose.

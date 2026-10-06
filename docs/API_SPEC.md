@@ -53,14 +53,26 @@ An **idempotent replay** returns the original response (same status, same body) 
 
 | Method & path | Body | Result | Notes |
 |---------------|------|--------|-------|
-| `POST /api/auth/participant/login` | `{teamLoginId, password, admissionNo}` | `data: {role:'PARTICIPANT', member:{id,slot}, team:{id,code,name,status}}` + cookie | Verifies password hash **and** that `admissionNo` belongs to that team. Same generic error for any mismatch (`Invalid credentials`). Revokes the member's previous live session (`SUPERSEDED`). Does **not** start the timer. Allowed only while competition is `RUNNING` or `PAUSED` |
-| `POST /api/auth/staff/login` | `{username, password}` | `data: {role:'ADMIN'\|'SUPER_ADMIN', staff:{id,name}}` + cookie | Rejects `is_active=false` |
-| `POST /api/auth/logout` | — | `data:{}` | Revokes session (`LOGOUT`) |
-| `GET /api/auth/me` | — | principal summary | Used on app load and to detect revoked sessions |
+| `POST /api/auth/participant/login` | `{teamLoginId, password, admissionNo}` (strict: unknown fields → 400) | `data: {role:'PARTICIPANT', member:{id,slot}, team:{id,code,name,status}, session:{expires_at}}` + cookie | Verifies password hash **and** that `admissionNo` belongs to that team. Same generic error for any mismatch (`Invalid credentials`). Revokes the member's previous live session (`SUPERSEDED`). Does **not** start the timer. Allowed only while competition is `RUNNING` or `PAUSED` |
+| `POST /api/auth/staff/login` | `{username, password}` (strict) | `data: {role:'ADMIN'\|'SUPER_ADMIN', staff:{id,name}, session:{expires_at}}` + cookie | Rejects `is_active=false` with the same generic error. Does not supersede other sessions of the same account |
+| `POST /api/auth/logout` | — | `data:{}` + cookie cleared | Revokes the session (`LOGOUT`). Idempotent: always 200, also without a cookie or with a dead one |
+| `GET /api/auth/me` | — | the same `data` as login (principal summary) | Used on app load and to detect revoked sessions. Resolves the session and updates `last_seen_at`. 401 (and the cookie is cleared) if missing, malformed, expired, revoked or the staff account was disabled |
 | `POST /api/auth/violation/fullscreen-exit` | `{draft?:{questionId,answer,explanation,version}}` | `data:{}` | Participant only. Saves the draft if supplied, revokes the session (`FULLSCREEN_EXIT`), audits, pings `admin:{id}`. Also callable via `navigator.sendBeacon` |
 | `GET /api/auth/realtime-token` | — | `data:{token, expires_at}` | Short-lived JWT for the Realtime socket (`REALTIME_SPEC` §3.1) |
 
 All login endpoints are throttled **per account** (§8). Failed and successful logins are audited.
+
+**Implemented in Patch B9: `participant/login`, `staff/login`, `logout`, `me`.** `fullscreen-exit` and `realtime-token` are later phases.
+
+Details of the implemented endpoints:
+
+* **Request rules:** every `POST` needs `Origin` equal to `APP_ORIGIN` (else `403 FORBIDDEN`), `Content-Type: application/json` and a body ≤ 2 KB. Bodies are validated with strict zod schemas: unknown or missing fields → `400 VALIDATION_FAILED` whose `details.fields` lists field *names* only (values are never echoed). `password` is 1–72 bytes (bcrypt limit), `teamLoginId` ≤ 64, `admissionNo` ≤ 32 characters.
+* **Generic failure:** unknown team, wrong password, unknown admission number, an admission number of another team, unknown username, wrong staff password and an inactive staff account all return the identical `401 UNAUTHENTICATED` with message `Invalid credentials`. The specific reason is recorded only in the audit log.
+* **Throttle:** `429 RATE_LIMITED` with a `Retry-After` header and `details.retry_after_seconds` (§8).
+* **Competition gate:** participant login is checked only after the credentials are valid, so it cannot be used to probe accounts: `SETUP` or `ENDED` → `423 COMPETITION_NOT_RUNNING`; `RUNNING` and `PAUSED` are allowed.
+* **Cookie:** `Set-Cookie: __Host-session=<token>; Max-Age=43200; Path=/; Secure; HttpOnly; SameSite=Lax`. No `Domain`. Logout and a failed `/me` send the same cookie with `Max-Age=0`. All auth responses carry `Cache-Control: no-store`.
+* **Errors:** a database failure is `503 SERVICE_UNAVAILABLE` with a generic message; the session cookie is kept so a retry can succeed.
+* **Never returned:** passwords, password hashes, session tokens (other than in the cookie), admission numbers.
 
 ## 4. Participant endpoints (`role = PARTICIPANT`, team taken from the session)
 
@@ -145,8 +157,8 @@ Question `state` is one of `LOCKED | AVAILABLE | ACTIVE | PENDING_APPROVAL | APP
 
 | Control | Value (tunable) |
 |---------|-----------------|
-| Login attempts | 8 per account per 10 min, then exponential delay (30 s → 5 min); admin/Super Admin can clear. Keyed per `team:<loginId>` / `staff:<username>` — **never by IP alone**, because a campus NAT would lock out the whole venue |
-| Soft per-IP login ceiling | 600 / 10 min (only to stop scripted floods from one machine) |
+| Login attempts | 8 failures per account per 10 min, then a lock of 30 s, doubling per further failure up to 5 min (`auth_throttle`; B9). A locked attempt is refused without checking the password and does not extend the lock; a successful login clears the counter. Unknown accounts are throttled identically. The admin/Super Admin "clear" action is not built yet. Keyed per `team:<loginId>` / `staff:<username>` — **never by IP alone**, because a campus NAT would lock out the whole venue |
+| Soft per-IP login ceiling | 600 / 10 min (only to stop scripted floods from one machine). **Not implemented in B9**: the client IP is recorded in audit rows only |
 | Authenticated mutation | 30 / min per principal (autosave and heartbeat exempt, with their own caps: draft 1 per 1.5 s, heartbeat 1 per 10 s) |
 | Request body | 20 KB max on answer/draft; 2 KB elsewhere |
 | Passwords | min 10 chars for staff; admin-created team passwords min 8 and not equal to team ID/login ID |
