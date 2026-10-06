@@ -130,6 +130,8 @@ test.describe("question page", () => {
   });
 
   test("hint and buy-time dialogs", async ({ page }) => {
+    // ~45 s under software WebGL, longer than the 30 s default.
+    test.setTimeout(90_000);
     await startTheme(page);
     await page.getByRole("button", { name: /^Hint 1/ }).click();
     let dlg = page.getByRole("dialog", { name: "Hint 1" });
