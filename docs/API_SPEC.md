@@ -92,7 +92,7 @@ An admin is authorised for a team iff `teams.admin_id = principal.staff_id`. The
 | `GET /api/admin/queue` | `?cursor` | `list_pending_submissions` | Oldest-first pending submissions for this admin's teams |
 | `GET /api/admin/submissions/:id` | — | `get_submission_for_review` | Includes the question body **and** `question_keys` (reference answer, notes) — reviewers only |
 | `POST /api/admin/submissions/:id/approve` | — | `approve_submission` | Reward is fixed by the question, not chosen |
-| `POST /api/admin/submissions/:id/disapprove` | `{note?}` | `disapprove_submission` | Keeps the rejected row; clears the draft |
+| `POST /api/admin/submissions/:id/disapprove` | `{note?}` | `disapprove_submission` | Keeps the rejected row; keeps the draft |
 | `POST /api/admin/teams` | `{teamCode, name, loginId, password, confirmPassword, admissionNos[1..4]}` | `create_team` | Server checks password match, strength, uniqueness of `teamCode`, `loginId`, every `admissionNo`; assigns to caller; grants 500 coins as an `INITIAL_GRANT` ledger row |
 | `POST /api/admin/teams/:teamId/password` | `{newPassword}` | `reset_team_password` | Added (not in brief): needed when a team forgets credentials mid-event; audited |
 | `POST /api/admin/teams/:teamId/ufm/prepare` | `{action:'RESET_SCORE'\|'DISQUALIFY'}` | creates `ufm_challenges` row | Step 1; returns `{challengeId, expires_at}` (60 s) |

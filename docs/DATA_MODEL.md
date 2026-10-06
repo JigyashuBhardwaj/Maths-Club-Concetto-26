@@ -55,12 +55,14 @@ $$;
 create table competition (
   id                          smallint primary key default 1 check (id = 1),
   status                      competition_status not null default 'SETUP',
-  ultimate_seconds            int  not null default 14400,   -- 4 h
+  ultimate_seconds            int  not null default 7200,    -- LOCKED: 2 h = 7,200 s = 120 min
+  ultimate_minutes            int  generated always as (ultimate_seconds / 60) stored,
   initial_coins               int  not null default 500,
   points_per_completed_theme  int  not null default 500,
   points_per_solved_question  int  not null default 100,
   penalty_per_minute          int  not null default 5,
-  disqualified_score          int  not null default -1201,
+  reset_floor_score           int  not null default -1200,   -- UFM floor (reset-adjusted score >= -1200)
+  disqualified_score          int  not null default -1201,   -- = reset_floor_score - 1
   opened_at                   timestamptz,                   -- SETUP -> RUNNING
   paused_at                   timestamptz,                   -- set while PAUSED
   ended_at                    timestamptz,
@@ -176,8 +178,8 @@ Online/offline is derived: a member is **online** if they have a non-revoked ses
 
 ```sql
 create table themes (
-  id            smallint primary key check (id between 1 and 12),
-  code          char(1) not null unique,                 -- 'A'..'L' (admin matrix columns)
+  id            smallint primary key check (id between 1 and 10),
+  code          char(1) not null unique check (code between 'A' and 'J'),   -- 'A'..'J' (admin matrix columns)
   name          text not null,
   description   text not null,
   topics        text[] not null default '{}',
@@ -187,7 +189,7 @@ create table themes (
 );
 
 create table questions (
-  id                  smallint primary key,              -- 1..60
+  id                  smallint primary key check (id between 1 and 50),   -- 1..50
   theme_id            smallint not null references themes(id),
   ordinal             smallint not null check (ordinal between 1 and 5),
   body_md             text not null,                     -- Markdown + KaTeX (decision DEC-15)
@@ -218,7 +220,7 @@ create table hints (
 );
 ```
 
-Content is **seeded by a script and treated as read-only at runtime** (no content-editing UI). A migration-time check asserts exactly 12 themes × 5 questions.
+Content is **seeded by a script and treated as read-only at runtime** (no content-editing UI). A migration-time check asserts exactly 10 themes (A–J) × 5 questions (50).
 
 ### 3.7 Per-team progress
 
@@ -317,7 +319,7 @@ create index submissions_queue_idx on submissions (submitted_at) where status = 
 create index submissions_team_idx  on submissions (team_id, question_id, submitted_at);
 ```
 
-A **disapproval keeps the row** with `status='REJECTED'`; only the team's *draft* is cleared. This is what makes dispute resolution possible (`AMB-02`).
+A **disapproval keeps the row** with `status='REJECTED'`; the team's *draft* is **kept** (locked UI-2.1 rule). This is what makes dispute resolution possible (`AMB-02`).
 
 ### 3.9 `coin_transactions` (ledger)
 
@@ -420,6 +422,19 @@ create table ufm_challenges (            -- server-side second step for destruct
 
 Campus Wi-Fi puts many students behind one public IP, so throttling by IP would lock out the whole venue. Throttling is per account (`SEC-04`).
 
+### 3.13 Patch B reconciliation (runnable migrations)
+
+The authoritative DDL is now `supabase/migrations/*.sql` (applied in filename order, then `supabase/seed.sql`); `docs/evidence/schema.sql` is generated from it (`npm run db:evidence`); see `DATABASE_FOUNDATION.md`. The DDL excerpts above are the Phase 0 design with the locked amendments applied. Patch B changed or added, and nothing else:
+
+* **Locked amendments:** `ultimate_seconds` 7,200 (2 h = 120 min; check `competition_ultimate_locked_7200`, plus generated `ultimate_minutes`); `reset_floor_score` −1200 and `disqualified_score` −1201 (check: DQ = floor − 1); themes `A`–`J` (ids 1–10), questions 1–50 with `id = (theme_id − 1) × 5 + ordinal`; hints 1–100; `teams.final_minutes_taken` between 0 and 120.
+* **Referential integrity:** every FK is explicit `ON DELETE RESTRICT` (history is never cascaded away). Member-bearing columns (`unlocked_by`, `updated_by`, `purchased_by`, `submissions.member_id`, `coin_transactions.member_id`, `sessions.member_id`, `teams.final_submitted_by`) use composite FKs `(member_id, team_id) → team_members(id, team_id)`, so a member can only act for their own team. `team_questions` has composite FKs to `questions(id, theme_id)` and to `team_themes(team_id, theme_id)` (rows exist only for unlocked themes).
+* **State invariants:** `team_questions` — `AVAILABLE` only for Q1 (INV-04), `LOCKED`/`AVAILABLE` have no `activated_at`, `APPROVED`/`TIMED_OUT` carry their timestamps, trigger `QUESTION_PREVIOUS_NOT_APPROVED` (QN+1 cannot start before QN is approved). `teams` — `FINAL_SUBMITTED` ⇔ `final_submitted_at`; terminal status ⇔ `ended_at`; `DISQUALIFIED` ⇔ `score_override = −1201`. `submissions` — a decision needs `reviewed_by` and `reviewed_at`; `reward_awarded` only on `APPROVED`. `sessions` — expiry after creation; `revoked_at` ⇔ `revoke_reason`.
+* **Ledger:** `coin_transactions` is append-only (update/delete/truncate rejected), signs are checked per type, each spend/reward names its subject, a before-insert trigger enforces the running balance (`balance_after = previous + amount`) and `INITIAL_GRANT = competition.initial_coins`; the read-only checker `app.invariant_coin_balance_mismatch` finds any drift between `teams.coins` and the ledger.
+* **Sessions (decision A2, kept):** one `sessions` table; `member_sessions` (adds the M1–M4 slot), `admin_sessions` and `team_sessions` (team run state from `teams`) are read-only views. `member_presence` now reports the `presence_state` enum (`OFFLINE`/`ONLINE`).
+* **Timestamps:** `updated_at` (with a touch trigger) on `competition`, `staff_users`, `teams`, `team_members`, `sessions`; `created_at` added where missing.
+* **Security:** RLS enabled and forced on every table, no policies, all privileges revoked from `anon`/`authenticated`/`PUBLIC`; the service role holds explicit grants and cannot update/delete the audit trail or the ledger. Authorisation by team ownership (participant → own team, admin → `teams.admin_id`, super admin → all) is enforced by the server-side engine functions of Phase 5, never by the browser.
+* **Not changed:** the draft is **kept** on disapproval (locked UI-2.1 rule), so the schema has no draft-clearing step; `answer_drafts` is independent of `submissions`.
+
 ## 4. Derived objects
 
 ```sql
@@ -448,7 +463,7 @@ solved_questions  = count(team_questions where state = 'APPROVED')
 ref_time          = least(app.now(), coalesce(teams.ended_at, 'infinity'),
                           case when competition.status='PAUSED' then competition.paused_at end)
 remaining_seconds = greatest(0, teams.ends_at - ref_time)           -- NOT_STARTED: ultimate_seconds
-minutes_taken     = 240 - floor(remaining_seconds / 60)             -- clamped to [0, 240]
+minutes_taken     = 120 - floor(remaining_seconds / 60)             -- clamped to [0, 120]
 raw_score         = completed_themes*500 + solved_questions*100 + teams.coins - minutes_taken*5
 adjusted_score    = case when teams.score_reset_baseline is null then raw_score
                          else greatest(-1200, raw_score - teams.score_reset_baseline) end

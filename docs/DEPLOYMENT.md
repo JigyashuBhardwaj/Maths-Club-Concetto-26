@@ -59,7 +59,7 @@ Claude workspace repo ──patch+notes──▶ human review ──apply──�
 * **Migrations:** `supabase/migrations/NNNN_name.sql`, forward-only. Local: `supabase db reset` rebuilds from scratch and runs seeds; CI does the same and then runs the DB test suite.
 * **Scheduled jobs (`pg_cron`):** `expire_due_teams()` every 30 s; `refresh_leaderboard()` every 60 s; purge old `request_log` rows hourly. A health check reads `cron.job_run_details` and the Super Admin overview shows "sweeper last ran N s ago". If the sweeper stalls, lazy expiry still keeps rules correct; only idle-team finalisation and the leaderboard lag.
 * **Seeds**
-  * `npm run seed:content` — 12 themes, 60 questions, hints, reviewer keys. Idempotent; allowed everywhere; asserts counts.
+  * `npm run seed:content` — 10 themes (A–J), 50 questions, hints, reviewer keys. Idempotent; allowed everywhere; asserts counts.
   * `npm run seed:demo` — demo admins/teams; refuses unless `APP_ENV ∈ {development,test}` and the host is not the production project.
   * `npm run provision:superadmin` — interactive, one-time, credentials from the operator.
 * **Backups:** Pro's daily backups (confirm retention) **plus** a manual `pg_dump` (a) before the event, (b) at the mid-event break, (c) immediately after. Dumps are stored encrypted off-platform. PITR add-on is recommended for the event month if available. **A restore must be rehearsed once** on staging and timed.
@@ -99,7 +99,7 @@ Vercel function logs and error tracking; Supabase logs/`pg_stat_statements`; a S
 - [ ] **Demo accounts absent** (query returns zero) and `seed:demo` disabled in production
 - [ ] **Exactly one Super Admin**, login verified; no default/seed credentials
 - [ ] Real teams loaded: credentials delivered securely, each team's admission numbers verified, admin ↔ team assignments verified
-- [ ] 12 themes × 5 questions present with correct costs, rewards, time limits, hints and reviewer keys (checked by `seed:content` assertions *and* a human read-through)
+- [ ] 10 themes (A–J) × 5 questions (50) present with correct costs, rewards, time limits, hints and reviewer keys (checked by `seed:content` assertions *and* a human read-through)
 - [ ] Scoring verified on hand-computed fixtures in production-like data
 - [ ] Final-submit and auto-end tested on a throwaway team
 - [ ] Audit log writing and immutable

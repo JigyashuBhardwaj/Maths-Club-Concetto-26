@@ -13,20 +13,20 @@ One line per requirement extracted from the Master Brief, with where this design
 | REQ-007 | Member identity & online/offline known | 3, 24 | DATA_MODEL §3.5, §4; REALTIME §4 |
 | REQ-008 | Team creation form fields; auto-assignment to creating admin | 4 | API_SPEC §5 |
 | REQ-009 | 500 coins at start | 5, 7 | DATA_MODEL §3.9 (`INITIAL_GRANT`) |
-| REQ-010 | 4-hour (14,400 s) team timer starts once, when a participant actually enters the competition (after rules and fullscreen acknowledgement) — never at login; same for all members | 5 | STATE §5.1; DEC-01 |
+| REQ-010 | 2-hour (7,200 s) team timer starts once, when a participant actually enters the competition (after rules and fullscreen acknowledgement) — never at login; same for all members | 5 | STATE §5.1; DEC-01 |
 | REQ-011 | Timer authoritative on server; browser never authoritative | 5, 6, 18 | ARCH §6; STATE §1.3 |
 | REQ-012 | Team timer continues during pending, browsing, logout | 6 | STATE §4 |
 | REQ-013 | Question timer starts when the question becomes `ACTIVE` (Q1: when a participant enters it; later questions: on approval of the previous one) — not on theme unlock; several may run at once; pauses at submit; resumes on disapproval | 6, 16 | STATE §4, §5.2a, §5.6–5.7; DEC-26 |
 | REQ-014 | Question timeout blocks theme progression; theme greyed | 6 | STATE §4; DEC-17 |
 | REQ-015 | Shared coins; atomic, server-authoritative changes; ledger + cached balance | 7 | DATA_MODEL §3.9; STATE §5 |
-| REQ-016 | 12 themes × 5 questions + Final Submit ticket | 8 | DATA_MODEL §3.6; DEPLOY §9 |
+| REQ-016 | 10 themes (A–J) × 5 questions = 50 questions + Final Submit ticket (11 tickets) | 8 | DATA_MODEL §3.6; DEPLOY §9 |
 | REQ-017 | Theme unlock shared by whole team; parallel work on different themes | 8 | STATE §5.2 |
 | REQ-018 | Ordered questions; N+1 only after N approved; explicit states | 9 | STATE §4 |
 | REQ-019 | One pending submission per team/question; no resubmit while pending | 9 | DATA_MODEL §3.8 (partial unique index) |
 | REQ-020 | Text-only answer + explanation (multiline) | 10 | DATA_MODEL §3.8; DEC-15 |
 | REQ-021 | Two hint tiers, cost coins, shared, never paid twice; Tier 2 requires Tier 1 | 11 | DATA_MODEL §3.7; STATE §5.3; DEC-09 |
 | REQ-022 | Buy extra question time with coins; only before zero; question timer only | 12 | STATE §5.5; DEC-08 |
-| REQ-023 | Student home layout: logos, timer, coins, rules, leaderboard, 12 tickets + Final | 13 | (UI milestone; design-system pending references) |
+| REQ-023 | Student home layout: logos, timer, coins, rules, leaderboard, 10 theme tickets + Final = 11 tickets | 13 | (UI milestone; design-system pending references) |
 | REQ-024 | Theme unlock modal flow | 14 | API_SPEC §4; STATE §5.2 |
 | REQ-025 | Question page contents and Previous/Next rules; previous (approved) questions show the team's own answer only, never the reference answer | 15 | API_SPEC §4, §7; DEC-10; SEC-07 |
 | REQ-026 | Submission → admin review → approve/disapprove with fixed reward | 16 | STATE §5.7 |

@@ -22,7 +22,7 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 
 1. **Official repo scaffold.** I couldn't read it (not attached to this session). Please paste or attach: the file tree (two levels), `package.json`, the Next.js version, package manager (npm/pnpm/yarn), Node version, and whether Tailwind/shadcn/ESLint are already set up. Milestone 1 must be a patch that applies cleanly on top of what exists rather than a competing scaffold (`AMB-21`).
 2. **Competition date/time and who is on the team.** How many hours remain, and how many people (and Claude sessions) can work in parallel? This decides the cutline.
-3. **Content.** The numbers and text listed in §7 are on the critical path: without costs, rewards, time limits, hint costs and the 60 questions, the engine can be built but not verified end to end.
+3. **Content.** The numbers and text listed in §7 are on the critical path: without costs, rewards, time limits, hint costs and the 50 questions, the engine can be built but not verified end to end.
 4. **Accounts.** Supabase **Pro** project(s) and a Vercel account/team (staging + production). Region preference (I propose Mumbai).
 5. **Decisions marked ★ in §3** — I've written a default for each; reply only where you disagree.
 
@@ -40,13 +40,13 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 
 | ID | Decision | Recommended default | Why |
 |----|----------|--------------------|-----|
-| ★ DEC-01 | What starts a team's 4-hour timer **(locked)** | The team timer (14,400 s) starts when a participant actually **enters the competition interface**: after login, after acknowledging the rules, and after completing the fullscreen acknowledgement, the client calls *Enter competition*. Login never starts it. The first member to complete this starts it for the whole team; later members never restart it. The server is authoritative | A login-page glitch or a member just checking credentials must not burn a team's time |
+| ★ DEC-01 | What starts a team's 2-hour timer **(locked)** | The team timer (7,200 s = 120 min) starts when a participant actually **enters the competition interface**: after login, after acknowledging the rules, and after completing the fullscreen acknowledgement, the client calls *Enter competition*. Login never starts it. The first member to complete this starts it for the whole team; later members never restart it. The server is authoritative | A login-page glitch or a member just checking credentials must not burn a team's time |
 | DEC-02 | Global gate | Participants can't log in while competition is `SETUP`; Super Admin presses **Open** (`SETUP→RUNNING`) at the start. Each team's timer starts when its first member enters the competition (`DEC-01`) | Stops early starts; uses the `competition.status` you asked for |
 | ★ DEC-03 | Pending submissions when the team's time ends or it final-submits | Stay **reviewable** after the end; on approval the reward and score update, with minutes frozen at `ended_at`. Leaderboard marks the team "review pending" | Otherwise teams lose points because an admin was slow. Brief §18 ("no more submissions") is satisfied: no *new* submissions |
 | ★ DEC-04 | UFM semantics **(locked)** | **Reset score**: the official score becomes 0 *now* and the team **continues** (status `RUNNING`, timers, coins and progress untouched); points earned afterwards count normally from 0 (850 → Reset → 0 → earn 100 → 100). Implemented as a **baseline**, not an override: `teams.score_reset_at` + `teams.score_reset_baseline` (the raw score at that instant); official score = raw − baseline. **Disqualify**: official score −1201 (`score_override`), status `DISQUALIFIED`, team frozen, all later mutations rejected. Both need the server-verified two-step confirmation and are audited. A Super Admin "revert UFM" for mistakes stays a proposal, not default scope | Reset is a penalty, not an exit. **Locked rule:** a reset-adjusted score may never fall below −1200, so Disqualify (−1201) is always the lowest possible score and a non-disqualified team can never rank below a disqualified one (see `DATA_MODEL.md` §4) |
 | DEC-05 | Reverting a wrong approve/reject | Not in default scope; use a compensating `ADMIN_ADJUSTMENT` ledger entry | Reverting an approval after the next question started is a rabbit hole |
 | DEC-06 | Super Admin can review any team | **Yes**, audited | Fallback when an admin is absent |
-| ★ DEC-07 | Disapproval | Row kept as `REJECTED`; the team's **draft** is cleared; optional short reviewer note shown to the team | Brief says the answer is "cleared" — we clear the editable copy but keep history for disputes |
+| ★ DEC-07 | Disapproval | Row kept as `REJECTED`; the team's **draft is kept** (locked UI-2.1 rule: the typed answer stays in the box and the button returns to red Submit, so members can study their mistakes); optional short reviewer note shown to the team | Supersedes the brief's "cleared" wording; history is kept for disputes |
 | ★ DEC-08 | Buy time | Only while `ACTIVE` (not while pending); fixed pack (seconds + cost) per question; repeatable with an optional cap; `expectedPurchaseCount` prevents double-clicks across members | Brief doesn't give pack size or limits |
 | ★ DEC-09 | Hint tiers **(locked)** | **Tier 2 requires Tier 1** to have been purchased first (same question, same team); enforced in `buy_hint` and by a database trigger. Tier 1 stays freely purchasable; each hint is still paid once per team | Product decision |
 | DEC-10 | "Previous" question **(amended)** | Enabled for approved questions in **read-only**; disabled for Q1. It shows only the team's **own** answer and explanation, the approval/rejection state and the reviewer's non-sensitive note. It **never** shows the official reference answer or solution notes (`question_keys`), in any state | Reference material must not leak to teams still working on other questions |
@@ -55,7 +55,7 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 | ★ DEC-13 | Team size / identifiers | 1–4 members; admission numbers **globally unique**; team ID and login ID unique | A student in two teams would break member identity |
 | DEC-14 | Drafts | One **shared** draft per team+question with optimistic versioning; no live co-editing | Simple, loss-free; conflicts show a "teammate edited" notice |
 | ★ DEC-15 | Question content format | Markdown with KaTeX math and optional images; answers remain plain text | Questions are mathematical; plain text would be unreadable |
-| DEC-16 | "Minutes taken" | `240 − floor(remaining_seconds/60)`, clamped 0–240 | Brief says "integer minutes remaining" |
+| DEC-16 | "Minutes taken" | `120 − floor(remaining_seconds/60)`, clamped 0–120 | Brief says "integer minutes remaining" |
 | DEC-17 | Question timeout | Permanent for that question; the theme can never complete | As in brief §6/§12 |
 | DEC-18 | Review latency fairness | Follow the brief (team clock keeps running while pending). Oldest-first queue, visible wait times, Super Admin overview shows slow queues | Cheap mitigation without changing rules; consider a "review SLA" at the event |
 | DEC-19 | Supabase plan | **Pro** for production **and** staging | Free caps Realtime at 200 connections |
@@ -74,7 +74,7 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 | ID | Finding | Resolution proposed |
 |----|---------|---------------------|
 | AMB-01 | §5 starts each team's clock on first entry; §27 introduces a global `SETUP/RUNNING` state without saying how they interact | `DEC-01`, `DEC-02` |
-| AMB-02 | §16 says disapproval "clears" the answer; §28 wants every event reconstructable for disputes | Keep a `REJECTED` history row; clear only the draft (`DEC-07`) |
+| AMB-02 | §16 says disapproval "clears" the answer; §28 wants every event reconstructable for disputes | Keep a `REJECTED` history row; the draft is **kept**, not cleared (`DEC-07`, locked UI-2.1) |
 | AMB-03 | §18 "no more submissions" at timeout vs. submissions already awaiting review | `DEC-03` |
 | AMB-04 | §17 final submit stops "all timers" but is silent on pending submissions | `DEC-03` |
 | AMB-05 | §23 "reset score to zero" doesn't say whether the team keeps playing; −1201 is correctly one below the minimum natural score (−1200) | **Resolved by the product owner:** Reset → score becomes 0, the team continues and later points count from 0; Disqualify → −1201 and frozen (`DEC-04`; tests `SC-04`, `SC-07`…`SC-09`, `AD-10`, `AD-11`) |
@@ -105,7 +105,7 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 |----|------|---|---|------------|
 | RISK-01 | **Realtime connection cap:** Free = 200, Pro = 500 (verified against Supabase's published limits at the time of writing) vs. 300–400 target | H | H | Pro for prod and staging; load test `LT-03`; poll fallback |
 | RISK-02 | Venue Wi-Fi blocks WebSockets / shared-IP lockouts | M | H | Poll mode built in; per-account throttling; test on-site (`SP-04`) |
-| RISK-03 | **Content not ready** (60 questions, 120 hints, ~200 numbers, reviewer keys) | H | H | Content schema + validator early; seed script asserts completeness |
+| RISK-03 | **Content not ready** (50 questions, 100 hints, ~200 numbers, reviewer keys) | H | H | Content schema + validator early; seed script asserts completeness |
 | RISK-04 | Two-day scope | H | H | Cutline (§8); vertical slice first; parallel work packages |
 | RISK-05 | Docker/local Supabase hard to run on team laptops (Windows) | M | M | Cloud dev project fallback; tests can run against it |
 | RISK-06 | Timer correctness (pause shift, lazy expiry, frozen timers) | M | H | Single time function, test clock, concurrency tests CC-01…08, invariant checker |
@@ -146,10 +146,10 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 
 | Item | Count | Fields |
 |------|-------|--------|
-| Themes | 12 | name, description, topics, difficulty, unlock cost |
-| Questions | 60 | body (Markdown + KaTeX; images allowed), difficulty, reward coins, time limit, buy-time seconds + cost (+ optional max purchases) |
+| Themes | 10 (A–J) | name, description, topics, difficulty, unlock cost |
+| Questions | 50 (5 per theme) | body (Markdown + KaTeX; images allowed), difficulty, reward coins, time limit, buy-time seconds + cost (+ optional max purchases) |
 | Hints | 120 | tier-1 and tier-2 text, cost each |
-| Reviewer material | 60 | reference answer, solution notes (admin-only) |
+| Reviewer material | 50 | reference answer, solution notes (admin-only) |
 | Rules text | 1 | for the Rules screen |
 | Branding | — | Concetto logo (not yet supplied), Maths Club logo (have) |
 

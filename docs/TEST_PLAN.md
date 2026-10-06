@@ -4,7 +4,7 @@ Status: **proposal for review (Milestone 0).** No test code exists yet. (Only th
 
 ## 1. Strategy
 
-The engine is in Postgres, so the most valuable tests run **against a real Postgres** with the controllable clock `app.now()` (see `DATA_MODEL.md` §2). That lets us test "4 hours later" and "question timed out 1 second ago" deterministically, without sleeping.
+The engine is in Postgres, so the most valuable tests run **against a real Postgres** with the controllable clock `app.now()` (see `DATA_MODEL.md` §2). That lets us test "2 hours later" and "question timed out 1 second ago" deterministically, without sleeping.
 
 | Layer | Tool | What it covers | Where it runs |
 |-------|------|----------------|---------------|
@@ -53,12 +53,12 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 
 | ID | Scenario | Layer |
 |----|----------|-------|
-| CE-01 | The first *Enter competition* (after rules + fullscreen acknowledgement) starts the team timer; `ends_at = started_at + 14,400 s` | DB |
+| CE-01 | The first *Enter competition* (after rules + fullscreen acknowledgement) starts the team timer; `ends_at = started_at + 7,200 s` | DB |
 | CE-02 | Second member entering later sees the already-reduced timer; second start call does not restart it | DB/E2E |
 | CE-03 | Timer is server-authoritative: manipulated client clock changes nothing (API contains no time input) | API/E2E |
 | CE-04 | Team timer keeps running while a question is `PENDING_APPROVAL` | DB |
 | CE-05 | Question timer freezes at submit (`timer_remaining_seconds`) | DB |
-| CE-06 | Disapproval resumes the question timer from the frozen value and clears the draft | DB |
+| CE-06 | Disapproval resumes the question timer from the frozen value and keeps the draft | DB |
 | CE-07 | Approval awards the fixed reward, activates the next question with a fresh timer | DB |
 | CE-08 | Question deadline passes → `TIMED_OUT`; later questions stay `LOCKED`; theme shows failed | DB |
 | CE-09 | Team timer reaches 0 → team `ENDED`, `ended_at = ends_at`, all mutations rejected, score frozen | DB |
@@ -121,7 +121,7 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 |----|----------|
 | AD-01 | Admin sees only assigned teams; direct URL to another team → 404/403 |
 | AD-02 | Approve → cell turns green, reward applied, next question `ACTIVE` with a fresh timer |
-| AD-03 | Disapprove → returns to active, draft cleared, rejected row retained |
+| AD-03 | Disapprove → returns to active, draft kept, rejected row retained |
 | AD-04 | Reset score and disqualify each need the two-step confirmation; direct call without a challenge fails |
 | AD-05 | UFM writes an audit event with the previous score |
 | AD-06 | Every event in the catalogue (`STATE_MACHINE` §8) appears in the audit log with the right actor |
@@ -136,7 +136,7 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 | ID | Scenario |
 |----|----------|
 | SC-01 | Formula: `themes×500 + solved×100 + coins − minutes×5` on hand-computed fixtures |
-| SC-02 | Minutes taken uses the floor of remaining minutes; boundaries 0:00, 0:59, 1:00, 240:00 |
+| SC-02 | Minutes taken uses the floor of remaining minutes; boundaries 0:00, 0:59, 1:00, 120:00 |
 | SC-03 | Score freezes at `ended_at` for final-submitted and ended teams |
 | SC-04 | Disqualify override is exactly −1201; the minimum natural score (−1200) is above −1201 |
 | SC-07 | Reset baseline: score 850 → Reset → 0 → earn 100 (approval) → 100; the time penalty and purchases keep applying after the Reset |

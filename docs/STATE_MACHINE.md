@@ -55,7 +55,7 @@ Two consequences: while the competition is `PAUSED` every clock reads the instan
 
 | From | Event (Super Admin only) | Guard | Effects |
 |------|--------------------------|-------|---------|
-| SETUP | `open` | at least 1 team, 12 themes × 5 questions present | `status='RUNNING'`, `opened_at=now`; audit; ping `global` |
+| SETUP | `open` | at least 1 team, 10 themes (A–J) × 5 questions present | `status='RUNNING'`, `opened_at=now`; audit; ping `global` |
 | RUNNING | `pause` | — | `status='PAUSED'`, `paused_at=now`; audit; ping |
 | PAUSED | `resume` | — | `delta = now - paused_at`; for every `RUNNING` team `ends_at += delta`; for every `ACTIVE` question `timer_deadline += delta`; `status='RUNNING'`, `paused_at=NULL`; audit with `delta`; ping |
 | RUNNING/PAUSED | `end` | confirmation | `status='ENDED'`; every `RUNNING` team is ended via `expire_team(reason='COMPETITION_ENDED')`; audit; ping |
@@ -80,7 +80,7 @@ While `PAUSED`: all participant mutations return `COMPETITION_PAUSED`; admin rev
 
 | From | Event | Actor | Guard | Effects |
 |------|-------|-------|-------|---------|
-| NOT_STARTED | `start_team_competition` | the first member to **enter the competition interface**: the client calls it only after the member has acknowledged the rules and completed the fullscreen acknowledgement. Login never calls it | competition `RUNNING` | `status='RUNNING'`, `started_at=now`, `ends_at=now+14400s`; coins already 500 from creation; audit `TEAM_STARTED`. Exactly-once: guarded by the status check under the team lock, so two members entering together start the clock once; later members, re-logins and re-entering fullscreen never restart it. |
+| NOT_STARTED | `start_team_competition` | the first member to **enter the competition interface**: the client calls it only after the member has acknowledged the rules and completed the fullscreen acknowledgement. Login never calls it | competition `RUNNING` | `status='RUNNING'`, `started_at=now`, `ends_at=now+7200s`; coins already 500 from creation; audit `TEAM_STARTED`. Exactly-once: guarded by the status check under the team lock, so two members entering together start the clock once; later members, re-logins and re-entering fullscreen never restart it. |
 | RUNNING | `final_submit` | any member | none pending-blocking (see `DEC-03`) | §5.8 |
 | RUNNING | auto-end | system (lazy or sweeper) | `now >= ends_at` | §5.4 |
 | RUNNING | `disqualify_team` | assigned admin / super admin | two-step confirmation | `status='DISQUALIFIED'`, `ended_at=now`, `score_override=-1201`. The team is frozen and every later mutation is rejected. |
@@ -116,7 +116,7 @@ Terminal states are final. There is no transition out of them (brief §17: "fina
 | LOCKED (Qn, n ≥ 2) | Q(n-1) approved | team `RUNNING` | `ACTIVE`, `activated_at=now`, `timer_deadline = now + time_limit_seconds` (the timer starts at approval) |
 | ACTIVE | `submit_answer` | no pending submission, answer non-empty, `now < timer_deadline` | insert submission `PENDING`; `timer_remaining_seconds = timer_deadline - now`; `timer_deadline = NULL`; `state='PENDING_APPROVAL'` |
 | PENDING_APPROVAL | `approve_submission` | submission still `PENDING` | `state='APPROVED'`, `approved_at=now`, `timer_remaining_seconds=NULL`; reward ledger row; activate next question (or complete theme) |
-| PENDING_APPROVAL | `disapprove_submission` | submission still `PENDING` | `state='ACTIVE'`, `timer_deadline = now + timer_remaining_seconds`, `timer_remaining_seconds=NULL`; submission → `REJECTED` (row kept); draft cleared |
+| PENDING_APPROVAL | `disapprove_submission` | submission still `PENDING` | `state='ACTIVE'`, `timer_deadline = now + timer_remaining_seconds`, `timer_remaining_seconds=NULL`; submission → `REJECTED` (row kept); draft kept |
 | ACTIVE | deadline reached | `timer_deadline <= now` | `state='TIMED_OUT'`, `timed_out_at = timer_deadline`, `timer_deadline=NULL` |
 | ACTIVE | `buy_time` | `now < timer_deadline`, purchases left, coins | `timer_deadline += buy_time_seconds` |
 | ACTIVE | `buy_hint` | coins, hint not already owned, Tier 1 owned if buying Tier 2 | no state change |
@@ -184,7 +184,7 @@ Request carries `expected_purchase_count` (the `time_purchase_count` the client 
 4. Freeze the question timer: `timer_remaining_seconds = timer_deadline - now`, `state='PENDING_APPROVAL'`.
 5. Audit `ANSWER_SUBMITTED`. Ping `team:{id}` and `admin:{admin_id}`.
 
-The draft is **not** deleted on submit (it is the submitted text); it is cleared only on disapproval.
+The draft is **not** deleted on submit (it is the submitted text); it is also **kept** on disapproval (locked UI-2.1 rule), so members can study their mistakes and resubmit.
 
 ### 5.7 `approveSubmission` / `disapproveSubmission`
 Common: caller is the assigned admin or the Super Admin (`DEC-06`). Find the team via the submission, **lock the team first**, then re-read the submission; if it is not `PENDING` return `SUBMISSION_NOT_PENDING` (covers two admins clicking at once). Competition must be `RUNNING`. Team may be in a terminal state only for a permitted late review (`DEC-03`).
@@ -198,7 +198,7 @@ Common: caller is the assigned admin or the Super Admin (`DEC-06`). Find the tea
 **Disapprove**
 1. `submissions.status='REJECTED'` (+ optional `review_note`).
 2. Question → `ACTIVE`, `timer_deadline = now + timer_remaining_seconds`. If the team is already terminal, the question simply returns to `ACTIVE` but frozen by `ended_at`.
-3. Delete the team's `answer_drafts` row for the question.
+3. Leave the team's `answer_drafts` row untouched: the typed answer stays in the box (locked UI-2.1 rule).
 4. Audit `SUBMISSION_REJECTED`; ping.
 
 ### 5.8 `finalSubmit` (`final_submit`)
