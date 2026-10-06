@@ -47,7 +47,7 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 | DEC-05 | Reverting a wrong approve/reject | Not in default scope; use a compensating `ADMIN_ADJUSTMENT` ledger entry | Reverting an approval after the next question started is a rabbit hole |
 | DEC-06 | Super Admin can review any team | **Yes**, audited | Fallback when an admin is absent |
 | ★ DEC-07 | Disapproval | Row kept as `REJECTED`; the team's **draft is kept** (locked UI-2.1 rule: the typed answer stays in the box and the button returns to red Submit, so members can study their mistakes); optional short reviewer note shown to the team | Supersedes the brief's "cleared" wording; history is kept for disputes |
-| ★ DEC-08 | Buy time | Only while `ACTIVE` (not while pending); fixed pack (seconds + cost) per question; repeatable with an optional cap; `expectedPurchaseCount` prevents double-clicks across members | Brief doesn't give pack size or limits |
+| ★ DEC-08 | Buy time | Only while `ACTIVE` (not while pending); several configurable options (seconds + cost + optional cap) per question, the participant UI shows three (2/4/8 min = 20/40/80 coins as placeholder content); `expectedPurchaseCount` prevents double-clicks across members | Brief doesn't give pack size or limits |
 | ★ DEC-09 | Hint tiers **(locked)** | **Tier 2 requires Tier 1** to have been purchased first (same question, same team); enforced in `buy_hint` and by a database trigger. Tier 1 stays freely purchasable; each hint is still paid once per team | Product decision |
 | DEC-10 | "Previous" question **(amended)** | Enabled for approved questions in **read-only**; disabled for Q1. It shows only the team's **own** answer and explanation, the approval/rejection state and the reviewer's non-sensitive note. It **never** shows the official reference answer or solution notes (`question_keys`), in any state | Reference material must not leak to teams still working on other questions |
 | DEC-11 | Leaderboard | Exclude `NOT_STARTED` teams (they'd otherwise score +500); rank by score, then fewer minutes, then team code | An unstarted team with 500 coins would outrank teams that played |
@@ -147,7 +147,7 @@ Honest scope warning: the full brief is roughly **55–65 hours of focused work*
 | Item | Count | Fields |
 |------|-------|--------|
 | Themes | 10 (A–J) | name, description, topics, difficulty, unlock cost |
-| Questions | 50 (5 per theme) | body (Markdown + KaTeX; images allowed), difficulty, reward coins, time limit, buy-time seconds + cost (+ optional max purchases) |
+| Questions | 50 (5 per theme) | body (Markdown + KaTeX; images allowed), difficulty, reward coins, time limit, buy-time options (seconds + cost + optional max purchases, three per question in the UI) |
 | Hints | 120 | tier-1 and tier-2 text, cost each |
 | Reviewer material | 50 | reference answer, solution notes (admin-only) |
 | Rules text | 1 | for the Rules screen |

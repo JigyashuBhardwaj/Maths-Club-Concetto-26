@@ -42,7 +42,7 @@ Status: **proposal for review (Milestone 0).** Contract-first: the zod schemas i
 | SUBMISSION_PENDING | 409 | One submission already awaiting review |
 | STALE_PURCHASE_COUNT | 409 | Another member bought time first; refresh and retry |
 | STALE_DRAFT | 409 | Teammate saved a newer draft; `details` carries it |
-| TIME_PURCHASE_LIMIT | 409 | `max_time_purchases` reached |
+| TIME_PURCHASE_LIMIT | 409 | the chosen option's `max_purchases` reached |
 | SUBMISSION_NOT_PENDING | 409 | Already reviewed |
 | CONFIRMATION_REQUIRED | 409 | UFM second step missing/expired |
 | NOT_FOUND | 404 | Unknown id or not visible to the caller |
@@ -72,7 +72,7 @@ All login endpoints are throttled **per account** (§8). Failed and successful l
 | `POST /api/p/questions/:questionId/enter` | — | `start_question` | Called by the client when the participant **opens** the question page; there is no Start button. Activates an `AVAILABLE` question (`AVAILABLE → ACTIVE`, timer starts) and returns the authoritative `deadline` and the body. Idempotent and race-safe: if two members enter together the question is activated once and both get the same deadline; for an already-`ACTIVE`/`PENDING_APPROVAL`/`APPROVED` question it simply returns the current state. Only Q1 of an unlocked theme can be `AVAILABLE` |
 | `POST /api/p/themes/:themeId/unlock` | — | `unlock_theme` | |
 | `POST /api/p/questions/:questionId/hints/:tier/buy` | — | `buy_hint` | tier ∈ {1,2}; replay of an owned hint returns `already_owned:true`, no charge; Tier 2 before Tier 1 → `409 HINT_TIER1_REQUIRED`, no charge |
-| `POST /api/p/questions/:questionId/time/buy` | `{expectedPurchaseCount}` | `buy_time` | |
+| `POST /api/p/questions/:questionId/time/buy` | `{optionId, expectedPurchaseCount}` | `buy_time` | `optionId` is one of the question's `buy_time_options`; seconds and price come from that row, never from the client |
 | `PUT /api/p/questions/:questionId/draft` | `{answer, explanation, expectedVersion}` | `save_draft` | Debounced autosave. Returns new `version`. `STALE_DRAFT` returns the server copy |
 | `POST /api/p/questions/:questionId/submit` | `{answer, explanation}` | `submit_answer` | Server validates lengths again; answer required |
 | `POST /api/p/final-submit` | `{confirm:true}` | `final_submit` | `ALREADY_SUBMITTED` for the losing caller |
@@ -128,7 +128,8 @@ An admin is authorised for a team iff `teams.admin_id = principal.staff_id`. The
       "questions": [                                         // [] while LOCKED: no question data leaves the server
         { "id": 3, "ordinal": 1, "state": "APPROVED" },
         { "id": 4, "ordinal": 2, "state": "ACTIVE", "deadline": 1759991800000, "reward_coins": 40,
-          "time_purchase_count": 0, "buy_time_cost": 10, "buy_time_seconds": 120, "max_time_purchases": null,
+          "time_purchase_count": 0,
+          "buy_time_options": [ { "id": 10, "seconds": 120, "cost": 20, "max_purchases": null }, { "id": 11, "seconds": 240, "cost": 40, "max_purchases": null } ],
           "hints": [ { "tier": 1, "owned": true, "cost": 15 }, { "tier": 2, "owned": false, "cost": 30, "purchasable": true } ] },
         { "id": 5, "ordinal": 3, "state": "LOCKED" }
       ] }

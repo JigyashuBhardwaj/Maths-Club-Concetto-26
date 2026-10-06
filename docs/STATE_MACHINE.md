@@ -118,7 +118,7 @@ Terminal states are final. There is no transition out of them (brief §17: "fina
 | PENDING_APPROVAL | `approve_submission` | submission still `PENDING` | `state='APPROVED'`, `approved_at=now`, `timer_remaining_seconds=NULL`; reward ledger row; activate next question (or complete theme) |
 | PENDING_APPROVAL | `disapprove_submission` | submission still `PENDING` | `state='ACTIVE'`, `timer_deadline = now + timer_remaining_seconds`, `timer_remaining_seconds=NULL`; submission → `REJECTED` (row kept); draft kept |
 | ACTIVE | deadline reached | `timer_deadline <= now` | `state='TIMED_OUT'`, `timed_out_at = timer_deadline`, `timer_deadline=NULL` |
-| ACTIVE | `buy_time` | `now < timer_deadline`, purchases left, coins | `timer_deadline += buy_time_seconds` |
+| ACTIVE | `buy_time` | `now < timer_deadline`, option exists for the question, option cap not reached, coins | `timer_deadline += option.seconds` |
 | ACTIVE | `buy_hint` | coins, hint not already owned, Tier 1 owned if buying Tier 2 | no state change |
 
 A question that is `PENDING_APPROVAL` cannot time out (its clock is frozen). A `TIMED_OUT` question is permanent: no buy-time, no resubmission (brief §12), and the theme can never be completed (`team_theme_progress.has_timed_out`).
@@ -170,11 +170,11 @@ Not on the brief's list; added by the locked rule that a question timer starts w
 The sweeper (`pg_cron`, every 30 s) runs `expire_due_teams()` which calls `expire_team` for every `RUNNING` team with `ends_at <= now`, using `FOR UPDATE SKIP LOCKED` so it never queues behind live traffic.
 
 ### 5.5 `buyTime` (`buy_time`)
-Request carries `expected_purchase_count` (the `time_purchase_count` the client saw).
+Request carries the chosen `option_id` (one of the question's `question_buy_time_options`) and `expected_purchase_count` (the `time_purchase_count` the client saw).
 1. Preamble. Question must be `ACTIVE` and `now < timer_deadline` (else `QUESTION_TIMED_OUT` / `QUESTION_NOT_ACTIVE`). Not allowed while `PENDING_APPROVAL` (`DEC-08`).
 2. `time_purchase_count == expected_purchase_count` else `STALE_PURCHASE_COUNT` (two members clicking at once cannot silently buy twice).
-3. `max_time_purchases` not exceeded. Coins sufficient.
-4. `coins -= cost`; ledger `TIME_PURCHASE` with `purchase_seq = count+1`; `timer_deadline += buy_time_seconds`; `extra_seconds += …`; `time_purchase_count += 1`.
+3. The option belongs to the question and its `max_purchases` (per team and question) is not exceeded. Coins sufficient.
+4. `coins -= option.cost`; ledger `TIME_PURCHASE` with `purchase_seq = count+1`; a `team_time_purchases` row (seq, option, seconds, cost); `timer_deadline += option.seconds`; `extra_seconds += …`; `time_purchase_count += 1`.
 5. **The team's `ends_at` is never touched.** Audit `TIME_PURCHASED`.
 
 ### 5.6 `submitAnswer` (`submit_answer`)

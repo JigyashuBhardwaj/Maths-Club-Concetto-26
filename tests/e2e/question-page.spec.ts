@@ -171,6 +171,8 @@ test.describe("question page", () => {
   });
 
   test("no axe violations: active, dialog open, pending, approved", async ({ page }) => {
+    // Four axe scans plus UI steps take ~50 s under software WebGL, longer than the 30 s default.
+    test.setTimeout(90_000);
     const scan = async (label: string) => {
       await page.waitForTimeout(600);
       const r = await new AxeBuilder({ page }).analyze();

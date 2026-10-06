@@ -196,9 +196,6 @@ create table questions (
   difficulty          difficulty not null,
   reward_coins        int not null check (reward_coins >= 0),
   time_limit_seconds  int not null check (time_limit_seconds > 0),
-  buy_time_seconds    int not null check (buy_time_seconds > 0),
-  buy_time_cost       int not null check (buy_time_cost >= 0),
-  max_time_purchases  int,                               -- null = unlimited
   unique (theme_id, ordinal)
 );
 
@@ -208,6 +205,24 @@ create table question_keys (
   question_id       smallint primary key references questions(id),
   reference_answer  text not null,
   solution_notes    text
+);
+
+-- Buy Time options (follow-up to Patch B): several configurable options per question (seeded: 120 s / 20, 240 s / 40,
+-- 480 s / 80 coins; placeholders, not constants). Purchases keep a snapshot of what was bought and paid.
+create table question_buy_time_options (
+  id             smallint primary key check (id > 0),
+  question_id    smallint not null references questions(id) on delete restrict,
+  seconds        int      not null check (seconds > 0),
+  cost           int      not null check (cost >= 0),
+  max_purchases  int      check (max_purchases is null or max_purchases >= 0),   -- per team and question; null = unlimited
+  display_order  smallint not null check (display_order > 0),
+  unique (question_id, display_order), unique (question_id, seconds), unique (id, question_id)
+);
+create table team_time_purchases (       -- append-only; (team_id, question_id, seq) mirrors coin_transactions.purchase_seq
+  team_id uuid not null references teams(id), question_id smallint not null, seq int not null check (seq >= 1),
+  option_id smallint not null, seconds_added int not null check (seconds_added > 0), cost_paid int not null check (cost_paid >= 0),
+  purchased_by uuid not null, purchased_at timestamptz not null,
+  primary key (team_id, question_id, seq)  -- + composite FKs to team_questions, the option (same question) and the member (same team)
 );
 
 create table hints (
@@ -430,6 +445,7 @@ The authoritative DDL is now `supabase/migrations/*.sql` (applied in filename or
 * **Referential integrity:** every FK is explicit `ON DELETE RESTRICT` (history is never cascaded away). Member-bearing columns (`unlocked_by`, `updated_by`, `purchased_by`, `submissions.member_id`, `coin_transactions.member_id`, `sessions.member_id`, `teams.final_submitted_by`) use composite FKs `(member_id, team_id) → team_members(id, team_id)`, so a member can only act for their own team. `team_questions` has composite FKs to `questions(id, theme_id)` and to `team_themes(team_id, theme_id)` (rows exist only for unlocked themes).
 * **State invariants:** `team_questions` — `AVAILABLE` only for Q1 (INV-04), `LOCKED`/`AVAILABLE` have no `activated_at`, `APPROVED`/`TIMED_OUT` carry their timestamps, trigger `QUESTION_PREVIOUS_NOT_APPROVED` (QN+1 cannot start before QN is approved). `teams` — `FINAL_SUBMITTED` ⇔ `final_submitted_at`; terminal status ⇔ `ended_at`; `DISQUALIFIED` ⇔ `score_override = −1201`. `submissions` — a decision needs `reviewed_by` and `reviewed_at`; `reward_awarded` only on `APPROVED`. `sessions` — expiry after creation; `revoked_at` ⇔ `revoke_reason`.
 * **Ledger:** `coin_transactions` is append-only (update/delete/truncate rejected), signs are checked per type, each spend/reward names its subject, a before-insert trigger enforces the running balance (`balance_after = previous + amount`) and `INITIAL_GRANT = competition.initial_coins`; the read-only checker `app.invariant_coin_balance_mismatch` finds any drift between `teams.coins` and the ledger.
+* **Buy Time options (follow-up):** `questions` no longer carries `buy_time_seconds` / `buy_time_cost` / `max_time_purchases`. `question_buy_time_options` holds any number of options per question (`seconds`, `cost`, nullable `max_purchases`, `display_order`), and `team_time_purchases` records each purchase with the seconds and price actually applied. A before-insert trigger enforces: question `ACTIVE`, `seq` = previous count + 1 (no gaps or replays), recorded seconds/cost equal the option's, and the option's per-team cap. The `buy_time` operation itself is Phase 5.
 * **Sessions (decision A2, kept):** one `sessions` table; `member_sessions` (adds the M1–M4 slot), `admin_sessions` and `team_sessions` (team run state from `teams`) are read-only views. `member_presence` now reports the `presence_state` enum (`OFFLINE`/`ONLINE`).
 * **Timestamps:** `updated_at` (with a touch trigger) on `competition`, `staff_users`, `teams`, `team_members`, `sessions`; `created_at` added where missing.
 * **Security:** RLS enabled and forced on every table, no policies, all privileges revoked from `anon`/`authenticated`/`PUBLIC`; the service role holds explicit grants and cannot update/delete the audit trail or the ledger. Authorisation by team ownership (participant → own team, admin → `teams.admin_id`, super admin → all) is enforced by the server-side engine functions of Phase 5, never by the browser.

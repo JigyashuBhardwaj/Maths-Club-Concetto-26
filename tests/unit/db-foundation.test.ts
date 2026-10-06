@@ -36,11 +36,12 @@ function walk(dir: string, out: string[] = []): string[] {
 
 describe("migrations", () => {
   it("are ordered, uniquely numbered and complete", () => {
-    expect(migrationNames).toHaveLength(9);
+    expect(migrationNames).toHaveLength(10);
     for (const f of migrationNames) expect(f).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
     expect(new Set(migrationNames.map((f) => f.slice(0, 14))).size).toBe(migrationNames.length);
     expect(migrationNames[0]).toContain("extensions_enums_clock");
-    expect(migrationNames.at(-1)).toContain("security_rls");
+    expect(migrationNames.at(-2)).toContain("security_rls");
+    expect(migrationNames.at(-1)).toContain("buy_time_options");
   });
 
   it("enable and force RLS, and grant the browser roles nothing", () => {

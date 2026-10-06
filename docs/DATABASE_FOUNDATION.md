@@ -8,8 +8,8 @@ TypeScript.
 ## Layout
 
 ```
-supabase/migrations/   9 ordered migrations (extensions+enums+clock … security/RLS)
-supabase/seed.sql      configuration + content only: 1 competition, 10 themes A–J, 50 questions, 100 hints, placeholder keys
+supabase/migrations/   10 ordered migrations (extensions+enums+clock … security/RLS, buy-time options)
+supabase/seed.sql      configuration + content only: 1 competition, 10 themes A–J, 50 questions, 150 buy-time options, 100 hints, placeholder keys
 supabase/tests/        plain-SQL tests (assert / rejects()); run by scripts/db-verify.mjs
 scripts/db-verify.mjs  scratch-database runner (npm run db:verify)
 scripts/db-evidence.mjs generates docs/evidence/schema.sql from the migrations (npm run db:evidence)
@@ -41,6 +41,7 @@ Applying to Supabase later: `supabase db push` (or run the migrations in order);
 | Q1 `AVAILABLE` after unlock  | `team_questions` (only Q1 may be `AVAILABLE`; no `activated_at`/deadline until `ACTIVE`)                                   |
 | QN+1 only after QN approved  | trigger `QUESTION_PREVIOUS_NOT_APPROVED`                                                                                   |
 | One pending submission       | unique partial index `submissions_one_pending`; rejected rows are kept                                                     |
+| Buy Time options             | `question_buy_time_options` (configurable seconds/cost/cap per question), `team_time_purchases` + guard trigger            |
 | Tier 2 needs Tier 1          | trigger `HINT_TIER1_REQUIRED`, one purchase per (team, hint)                                                               |
 | 500 starting coins, ledger   | `competition.initial_coins`, immutable `coin_transactions` with balance-chain trigger and per-subject unique indexes       |
 | UFM                          | `score_reset_baseline/at` paired; floor `reset_floor_score = −1200`; DQ `score_override = −1201`, only when `DISQUALIFIED` |
@@ -61,10 +62,11 @@ role cannot update or delete the audit trail or the coin ledger.
   `team_sessions` exist as read-only views over it (the option chosen for this patch). The team's authoritative timer lives on `teams`.
 - **The timer is locked in the database** (`ultimate_seconds = 7200`). Tests that need other times use the controllable
   clock `app.now()`, not a different duration. Relax the check deliberately if that is ever wanted.
-- **Buy Time packs:** the approved schema stores one pack per question (`buy_time_seconds`, `buy_time_cost`,
-  `max_time_purchases`), but the built question UI offers three packs (2/4/8 min = 20/40/80 coins). The database cannot
-  yet represent three packs per question; settle this before the Phase 5 `buy_time` operation.
-- Seed prices and rewards are placeholder content data (unlock 100, reward 50, hints 40/80, buy-time +2 min for 20).
+- **Buy Time options:** the question UI offers three options (+2/+4/+8 min for 20/40/80 coins). They live in
+  `question_buy_time_options` (`seconds`, `cost`, nullable `max_purchases`, `display_order`), not in the engine and not on `questions`.
+  `team_time_purchases` records each purchase (option, seconds and price applied, member), and a trigger guards the future
+  `buy_time` operation: question `ACTIVE`, `seq` = previous count + 1, recorded seconds/cost equal the option's, and the option's cap.
+- Seed prices and rewards are placeholder content data (unlock 100, reward 50, hints 40/80, buy-time options 120 s/20, 240 s/40, 480 s/80).
 
 ## Known limitations (later phases)
 

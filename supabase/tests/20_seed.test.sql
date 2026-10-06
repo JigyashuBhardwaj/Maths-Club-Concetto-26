@@ -28,13 +28,17 @@ begin
   assert not exists (select 1 from questions where time_limit_seconds <> 240), 'question timer is 4:00 everywhere';
   assert not exists (select 1 from questions where reward_coins <> 50), 'reward is fixed per question (50)';
   assert not exists (select 1 from hints where cost <> case tier when 1 then 40 else 80 end), 'hint prices 40/80';
-  assert (select count(*) from questions where buy_time_seconds > 0 and buy_time_cost >= 0) = 50, 'buy-time pack is configured per question';
+  -- Buy Time: three configurable options for every question (placeholder content, not constants)
+  assert (select count(*) from question_buy_time_options) = 150, '3 options x 50 questions';
+  assert not exists (select 1 from questions q where (select count(*) from question_buy_time_options o where o.question_id = q.id) <> 3), 'exactly 3 options per question';
+  assert not exists (select 1 from question_buy_time_options where (display_order, seconds, cost) not in ((1, 120, 20), (2, 240, 40), (3, 480, 80))), 'options are 120s/20, 240s/40, 480s/80 in display order';
+  assert not exists (select 1 from question_buy_time_options where max_purchases is not null), 'unlimited purchases in the seed';
 end $$;
 
 -- K / L can never be added: ids, codes and positions are all pinned
 select pg_temp.rejects($s$insert into themes (id, code, name, description, difficulty, unlock_cost, display_order) values (11, 'K', 'x', 'x', 'EASY', 1, 11)$s$, '23514');
 select pg_temp.rejects($s$insert into themes (id, code, name, description, difficulty, unlock_cost, display_order) values (10, 'K', 'x', 'x', 'EASY', 1, 99)$s$, '23514');
 select pg_temp.rejects($s$insert into themes (id, code, name, description, difficulty, unlock_cost, display_order) values (12, 'L', 'x', 'x', 'EASY', 1, 12)$s$, '23514');
-select pg_temp.rejects($s$insert into questions (id, theme_id, ordinal, body_md, difficulty, reward_coins, time_limit_seconds, buy_time_seconds, buy_time_cost) values (51, 10, 5, 'x', 'EASY', 1, 1, 1, 1)$s$, '23514');
-select pg_temp.rejects($s$insert into questions (id, theme_id, ordinal, body_md, difficulty, reward_coins, time_limit_seconds, buy_time_seconds, buy_time_cost) values (51, 10, 6, 'x', 'EASY', 1, 1, 1, 1)$s$, '23514');
+select pg_temp.rejects($s$insert into questions (id, theme_id, ordinal, body_md, difficulty, reward_coins, time_limit_seconds) values (51, 10, 5, 'x', 'EASY', 1, 1)$s$, '23514');
+select pg_temp.rejects($s$insert into questions (id, theme_id, ordinal, body_md, difficulty, reward_coins, time_limit_seconds) values (51, 10, 6, 'x', 'EASY', 1, 1)$s$, '23514');
 rollback;

@@ -8,7 +8,8 @@ begin
   select string_agg(t, ', ') into missing from unnest(array[
     'competition','staff_users','teams','team_members','sessions','themes','questions','question_keys','hints',
     'team_themes','team_questions','answer_drafts','hint_purchases','submissions','coin_transactions',
-    'request_log','audit_events','leaderboard_snapshot','auth_throttle','ufm_challenges']) t
+    'request_log','audit_events','leaderboard_snapshot','auth_throttle','ufm_challenges',
+    'question_buy_time_options','team_time_purchases']) t
    where to_regclass('public.' || t) is null;
   assert missing is null, 'missing tables: ' || missing;
   assert to_regclass('public.member_sessions') is not null and to_regclass('public.admin_sessions') is not null
@@ -46,7 +47,8 @@ begin
     'themes_code_matches_id','questions_id_matches_position','team_questions_active_has_deadline',
     'team_questions_pending_has_remaining','team_questions_unstarted_no_activation','team_questions_theme_unlocked_fk',
     'team_questions_question_fk','submissions_reviewed_iff_decided','coin_tx_sign','coin_tx_subject',
-    'sessions_principal','sessions_member_belongs_to_team','staff_admin_has_creator'] loop
+    'sessions_principal','sessions_member_belongs_to_team','staff_admin_has_creator',
+    'ttp_team_question_fk','ttp_option_fk','ttp_member_in_team'] loop
     assert exists (select 1 from pg_constraint where conname = c), 'constraint missing: ' || c;
   end loop;
 end $$;
@@ -65,6 +67,13 @@ begin
                            'ctx_team_idx','audit_team_idx','audit_type_idx','sessions_team_idx','teams_admin_idx'] loop
     assert exists (select 1 from pg_indexes where schemaname = 'public' and indexname = i), 'index missing: ' || i;
   end loop;
+end $$;
+
+-- Buy Time is normalised: the old single-pack columns are gone from questions
+do $$ begin
+  assert not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'questions'
+                      and column_name in ('buy_time_seconds', 'buy_time_cost', 'max_time_purchases')), 'single buy-time pack columns must not exist';
+  assert exists (select 1 from pg_trigger where tgname = 'team_time_purchases_guard');
 end $$;
 
 -- foreign keys: nothing cascades (history is never deleted), every FK is explicit

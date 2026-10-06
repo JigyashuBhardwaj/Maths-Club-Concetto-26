@@ -3,7 +3,7 @@
 -- Seeds ONLY: the competition configuration, 10 themes (A–J), 5 questions per theme (50), 2 hints per question
 -- (100) and placeholder reviewer keys. All text is clearly marked DEV PLACEHOLDER. The real competition content
 -- replaces it later; the structure (and the assertions at the bottom) stay.
--- Prices/rewards are placeholder CONTENT DATA (unlock 100, reward 50, hints 40/80, buy-time pack 2 min for 20 coins).
+-- Prices/rewards are placeholder CONTENT DATA (unlock 100, reward 50, hints 40/80, buy-time options 120 s/20, 240 s/40, 480 s/80).
 -- Staff accounts and teams are never seeded here: the Super Admin is provisioned out of band (no fake credentials).
 
 insert into competition (id) values (1) on conflict (id) do nothing;   -- defaults: SETUP, 7200 s, 500 coins, -1200 / -1201
@@ -18,14 +18,19 @@ from generate_series(1, 10) as n
 on conflict (id) do nothing;
 
 insert into questions (id, theme_id, ordinal, body_md, difficulty, reward_coins,
-                       time_limit_seconds, buy_time_seconds, buy_time_cost, max_time_purchases)
+                       time_limit_seconds)
 select (t.id - 1) * 5 + q, t.id, q,
        '[DEV PLACEHOLDER] Question ' || chr(64 + t.id) || q || '. Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
        t.difficulty, 50,
-       240,      -- the per-question timer: 4:00
-       120, 20,  -- buy-time pack: +2 min for 20 coins (configurable content data)
-       null      -- unlimited purchases
+       240       -- the per-question timer: 4:00
 from themes t cross join generate_series(1, 5) as q
+on conflict (id) do nothing;
+
+-- Three configurable Buy Time options per question (placeholders: +2 min / +4 min / +8 min), unlimited purchases.
+insert into question_buy_time_options (id, question_id, seconds, cost, max_purchases, display_order)
+select (q.id - 1) * 3 + o.n, q.id, o.seconds, o.cost, null, o.n
+from questions q
+cross join (values (1, 120, 20), (2, 240, 40), (3, 480, 80)) as o(n, seconds, cost)
 on conflict (id) do nothing;
 
 insert into question_keys (question_id, reference_answer, solution_notes)
@@ -50,6 +55,9 @@ begin
   assert (select count(*) = 10 and min(c) = 5 and max(c) = 5
             from (select count(*) c from questions group by theme_id) x), 'seed: 5 questions per theme';
   assert (select count(*) from hints) = 100,                             'seed: 2 hints per question';
+  assert (select count(*) from question_buy_time_options) = 150,        'seed: 3 buy-time options per question';
+  assert (select count(*) = 50 and min(c) = 3 and max(c) = 3
+            from (select count(*) c from question_buy_time_options group by question_id) x), 'seed: exactly 3 options for each question';
   assert (select count(*) from question_keys) = 50,                      'seed: a reviewer key per question';
   assert (select count(*) from staff_users) = 0 and (select count(*) from teams) = 0, 'seed: no staff or team accounts';
 end $$;
