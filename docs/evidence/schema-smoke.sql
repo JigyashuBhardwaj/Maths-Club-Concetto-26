@@ -6,7 +6,7 @@ insert into competition default values;
 insert into staff_users(username,display_name,password_hash,role) values ('root','Root','x','SUPER_ADMIN');
 \echo --- T1 second super admin must fail
 insert into staff_users(username,display_name,password_hash,role) values ('root2','Root2','x','SUPER_ADMIN');
-insert into staff_users(username,display_name,password_hash,role) values ('adm','Adm','x','ADMIN');
+insert into staff_users(username,display_name,password_hash,role,created_by) select 'adm','Adm','x','ADMIN',id from staff_users where username='root';
 insert into teams(team_code,name,login_id,password_hash,admin_id,coins) select 'T1','Team1','t1','x',id,500 from staff_users where username='adm';
 insert into team_members(team_id,slot,admission_no) select id,1,'ADM001' from teams;
 \echo --- T2 duplicate admission no must fail
@@ -53,14 +53,14 @@ update teams set score_override = -1201;
 \echo --- T15 score_reset_at without a baseline must fail
 update teams set score_reset_at = now();
 \echo --- T16 reset baseline recorded on a RUNNING team must succeed (no error expected)
-update teams set status='RUNNING', started_at=now(), ends_at=now()+interval '4 hours', score_reset_at=now(), score_reset_baseline=850;
+update teams set status='RUNNING', started_at=now(), ends_at=now()+interval '2 hours', score_reset_at=now(), score_reset_baseline=850;
 select status, score_reset_baseline, score_override from teams;
 \echo --- T17 disqualify (override + DISQUALIFIED + ended_at) after a reset must succeed (no error expected)
 update teams set status='DISQUALIFIED', ended_at=now(), score_override=-1201;
 select status, score_reset_baseline, score_override from teams;
 \echo --- views
 select * from team_theme_progress;
-select member_id is not null as has, online from member_presence order by 1 limit 2;
+select member_id is not null as has, presence from member_presence order by 1 limit 2;
 \echo --- test clock
 set app.allow_test_clock='on'; set app.test_now='2026-10-10 10:00:00+00'; select app.now();
 reset app.test_now; select (app.now() > '2026-01-01') as real_clock;

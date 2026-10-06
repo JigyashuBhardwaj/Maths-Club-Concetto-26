@@ -6,7 +6,10 @@ import {
   THEME_IDS,
   TOTAL_QUESTIONS,
   TOTAL_TICKETS,
+  TEAM_TIMER_MINUTES,
   TEAM_TIMER_SECONDS,
+  INITIAL_COINS,
+  UFM_RESET_FLOOR_SCORE,
   UFM_DISQUALIFY_SCORE,
   UFM_RESET_SCORE,
   type QuestionState,
@@ -58,8 +61,12 @@ describe("competition contracts (types only)", () => {
   });
 
   it("keeps the locked numeric constants", () => {
-    expect(TEAM_TIMER_SECONDS).toBe(14_400);
+    expect(TEAM_TIMER_SECONDS).toBe(7_200);
+    expect(TEAM_TIMER_MINUTES).toBe(120);
+    expect(INITIAL_COINS).toBe(500);
     expect(UFM_RESET_SCORE).toBe(0);
+    expect(UFM_RESET_FLOOR_SCORE).toBe(-1200);
+    expect(UFM_DISQUALIFY_SCORE).toBe(UFM_RESET_FLOOR_SCORE - 1);
     expect(UFM_DISQUALIFY_SCORE).toBe(-1201);
   });
 });

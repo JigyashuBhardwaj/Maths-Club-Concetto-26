@@ -4,8 +4,19 @@
  * The values mirror the locked product decisions so later backend and UI work agree.
  */
 
-/** Ultimate team timer, in seconds. Server-authoritative; starts at competition entry, not login. */
-export const TEAM_TIMER_SECONDS = 14_400;
+/**
+ * Ultimate Team Timer (locked): 2 hours = 7,200 s = 120 min. Server/database-authoritative; starts when the first
+ * member actually enters the competition (not at login). Scoring minutes = 120 − floor(remaining_seconds / 60),
+ * clamped to 0–120. The database enforces the same value (`competition_ultimate_locked_7200`).
+ */
+export const TEAM_TIMER_SECONDS = 7_200;
+export const TEAM_TIMER_MINUTES = TEAM_TIMER_SECONDS / 60;
+
+/** Every team starts with 500 Maths Coins (team-wide; the ledger is authoritative). */
+export const INITIAL_COINS = 500;
+
+/** UFM floor: a reset-adjusted score never goes below −1200; a disqualified team is pinned at −1201. */
+export const UFM_RESET_FLOOR_SCORE = -1200;
 
 /**
  * UFM outcomes. Reset: the official score becomes 0 at that moment, the team keeps playing and later
