@@ -6,8 +6,10 @@ import { Leaderboard } from "@/components/home/leaderboard";
 import { RulesButton } from "@/components/home/rules-dialog";
 import { TicketSpiral } from "@/components/home/ticket-spiral";
 import { MOCK_TEAM } from "@/lib/home/mock";
+import { __resetDemoStoreForTests } from "@/lib/question/store";
 
 beforeEach(() => {
+  __resetDemoStoreForTests();
   vi.stubGlobal(
     "matchMedia",
     (q: string) =>
@@ -106,12 +108,15 @@ describe("TicketSpiral", () => {
     expect(theme).toHaveAttribute("open");
     expect(screen.getByRole("heading", { name: "THEME C" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Unlock with xyz coins" }));
-    expect(screen.getByRole("button", { name: "Let's solve" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Let's solve" })).toHaveAttribute(
+      "href",
+      "/participant/theme/C/1",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Explore other themes" }));
     await waitFor(() => expect(theme).not.toHaveAttribute("open"));
     // the unlocked state is remembered locally for that theme
     fireEvent.click(screen.getByRole("button", { name: /THEME C/ }));
-    expect(screen.getByRole("button", { name: "Let's solve" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Let's solve" })).toBeInTheDocument();
   });
 
   it("final dialog: Yes, submit and Go back both just close", async () => {

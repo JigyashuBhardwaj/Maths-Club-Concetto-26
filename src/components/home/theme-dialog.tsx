@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useId } from "react";
 
 import { ModalDialog } from "@/components/ui/modal-dialog";
@@ -10,15 +11,24 @@ interface ThemeDialogProps {
   ticket: ThemeTicket | null;
   open: boolean;
   unlocked: boolean;
+  /** Where "Let's solve" goes: the member's current question in this theme. */
+  solveHref: string;
   onUnlock: () => void;
   onClose: () => void;
 }
 
 /**
- * "THEME X" dialog. Visual demo: unlocking only flips the button label locally; it does not deduct
- * coins, start a question timer or save anything (those arrive with the server-side engine).
+ * "THEME X" dialog. Demo: unlocking only flips the button to "Let's solve" (a link to the question
+ * page); it does not deduct coins or save anything server-side (that arrives with the engine).
  */
-export function ThemeDialog({ ticket, open, unlocked, onUnlock, onClose }: ThemeDialogProps) {
+export function ThemeDialog({
+  ticket,
+  open,
+  unlocked,
+  solveHref,
+  onUnlock,
+  onClose,
+}: ThemeDialogProps) {
   const titleId = useId();
   if (!ticket) return null;
 
@@ -32,9 +42,9 @@ export function ThemeDialog({ ticket, open, unlocked, onUnlock, onClose }: Theme
       </div>
       <div className="dialog-actions">
         {unlocked ? (
-          <button type="button" className="btn btn-primary" onClick={onClose}>
+          <Link href={solveHref} className="btn btn-primary btn-link">
             Let&apos;s solve
-          </button>
+          </Link>
         ) : (
           <button type="button" className="btn btn-primary" onClick={onUnlock}>
             Unlock with {UNLOCK_COST_PLACEHOLDER} coins

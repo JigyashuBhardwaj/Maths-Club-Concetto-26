@@ -135,7 +135,7 @@ test.describe("participant home", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText(/Lorem ipsum/)).toBeVisible();
     await dialog.getByRole("button", { name: "Unlock with xyz coins" }).click();
-    await expect(dialog.getByRole("button", { name: "Let's solve" })).toBeVisible();
+    await expect(dialog.getByRole("link", { name: "Let's solve" })).toBeVisible();
     await dialog.getByRole("button", { name: "Explore other themes" }).click();
     await expect(dialog).toBeHidden();
   });

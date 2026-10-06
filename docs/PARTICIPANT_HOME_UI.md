@@ -27,7 +27,7 @@ CSS 3D helix; tickets always face the viewer. It drifts at 5°/s and eases to a 
 
 ## Demo-only behaviour (not implemented on purpose)
 
-- "Unlock with xyz coins" only flips the button to "Let's solve" locally (remembered until reload). No coins are deducted, no question timer starts, nothing is saved. "Let's solve" just closes the dialog.
+- "Unlock with xyz coins" only flips the button to "Let's solve" (remembered for the browser tab, see `QUESTION_PAGE_UI.md`). No coins are deducted and nothing is saved on a server. Since PATCH UI-2, "Let's solve" is a link to the question page.
 - "Yes, submit" only closes the dialog. There is no final submission.
 - Timer (03:46:54), coins (446), rank/team/score (#12, TEAM123, 60) are constants in `lib/home/mock.ts`, taken from the layout image. The leaderboard source is empty (`emptyLeaderboardSource`).
 - The route is open: no login, no role check.
