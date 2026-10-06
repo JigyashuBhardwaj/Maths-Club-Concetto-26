@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  QUESTIONS_PER_THEME,
+  THEME_COUNT,
+  THEME_IDS,
+  TOTAL_QUESTIONS,
+  TOTAL_TICKETS,
   TEAM_TIMER_SECONDS,
   UFM_DISQUALIFY_SCORE,
   UFM_RESET_SCORE,
@@ -56,5 +61,19 @@ describe("competition contracts (types only)", () => {
     expect(TEAM_TIMER_SECONDS).toBe(14_400);
     expect(UFM_RESET_SCORE).toBe(0);
     expect(UFM_DISQUALIFY_SCORE).toBe(-1201);
+  });
+});
+
+describe("competition shape (locked: 10 themes x 5 questions + Final Submit)", () => {
+  it("has themes A-J only", () => {
+    expect([...THEME_IDS]).toEqual(["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]);
+    expect(THEME_IDS as readonly string[]).not.toContain("K");
+    expect(THEME_IDS as readonly string[]).not.toContain("L");
+  });
+  it("derives 50 questions and 11 tickets", () => {
+    expect(THEME_COUNT).toBe(10);
+    expect(QUESTIONS_PER_THEME).toBe(5);
+    expect(TOTAL_QUESTIONS).toBe(50);
+    expect(TOTAL_TICKETS).toBe(11);
   });
 });

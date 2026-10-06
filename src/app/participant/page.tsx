@@ -1,10 +1,5 @@
-import { PlaceholderPage } from "@/components/shell/placeholder-page";
+import { ParticipantHome } from "@/components/home/participant-home";
 
 export default function Page() {
-  return (
-    <PlaceholderPage
-      title="Participant"
-      description="The participant interface (rules acknowledgement, competition, themes, leaderboard) is not built yet. This route only demonstrates the shell."
-    />
-  );
+  return <ParticipantHome />;
 }

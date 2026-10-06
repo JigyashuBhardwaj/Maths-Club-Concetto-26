@@ -101,7 +101,7 @@ test.describe("landing page", () => {
 
 test.describe("placeholders and platform", () => {
   test("shell routes render", async ({ page }) => {
-    for (const path of ["/participant", "/admin", "/superadmin"]) {
+    for (const path of ["/admin", "/superadmin"]) {
       await page.goto(path);
       await expect(page.getByText("Placeholder", { exact: true })).toBeVisible();
     }

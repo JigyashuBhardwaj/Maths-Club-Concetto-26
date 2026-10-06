@@ -1,0 +1,639 @@
+/*
+ * Participant home page. Same visual language as the landing page (dark void, orange glow, glass
+ * panels, Manrope, wide-tracked caps); scoped under .home-stage so nothing leaks elsewhere.
+ * Layout fractions follow the supplied mock-up (leaderboard column ~28.7% wide, flush right).
+ */
+.home-stage {
+  position: relative;
+  width: 100%;
+  min-height: 100svh;
+  overflow-x: hidden;
+  isolation: isolate;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* ---------- background (viewport-pinned so it survives scrolling on small screens) ---------- */
+.home-stage .scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+  opacity: 0;
+  animation: home-fadein 2.2s ease forwards;
+}
+.home-stage[data-fallback="true"] {
+  background:
+    radial-gradient(60% 45% at 50% 105%, rgba(255, 106, 26, 0.28), transparent 70%),
+    radial-gradient(40% 30% at 50% 70%, rgba(255, 106, 26, 0.1), transparent 70%), var(--bg);
+}
+.home-stage[data-fallback="true"] .scene {
+  display: none;
+}
+.home-stage .vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 55%, transparent 55%, rgba(0, 0, 0, 0.65) 100%);
+}
+@keyframes home-fadein {
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------- page grid ---------- */
+.home-layout {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(260px, 28.7vw, 440px);
+  height: 100svh;
+  min-height: 520px;
+}
+.home-main {
+  display: grid;
+  grid-template-rows: 26svh minmax(0, 1fr);
+  min-width: 0;
+  padding-bottom: 4svh;
+}
+
+/* ---------- header ---------- */
+.home-header {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+.logo-badges {
+  --d: clamp(64px, 16svh, 150px);
+  display: flex;
+  flex: none;
+  padding-top: 1.4svh;
+}
+.badge {
+  flex: none;
+  width: var(--d);
+  height: var(--d);
+  will-change: transform;
+  transform: translate3d(calc(var(--px) * var(--k) * 1px), calc(var(--py) * var(--k) * 1px), 0);
+}
+.badge + .badge {
+  margin-left: calc(var(--d) * -0.15);
+}
+.badge:nth-child(1) {
+  z-index: 3;
+}
+.badge:nth-child(2) {
+  z-index: 2;
+}
+.badge:nth-child(3) {
+  z-index: 1;
+}
+.home-stage .float {
+  width: 100%;
+  height: 100%;
+  animation: home-float var(--dur, 9s) ease-in-out infinite alternate;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes home-float {
+  from {
+    transform: translate3d(0, -4px, 0) rotate(-0.6deg);
+  }
+  to {
+    transform: translate3d(0, 6px, 0) rotate(0.6deg);
+  }
+}
+.badge-disc {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 28%,
+    rgba(255, 255, 255, 0.1),
+    rgba(16, 16, 22, 0.78) 70%
+  );
+  border: 1px solid rgba(255, 150, 80, 0.3);
+  box-shadow:
+    0 0 28px -6px rgba(255, 106, 26, 0.45),
+    0 10px 30px -10px rgba(0, 0, 0, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.badge-disc img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  display: block;
+}
+.badge-disc.badge-mark img {
+  width: 92%;
+  height: 92%;
+  filter: drop-shadow(0 0 14px rgba(255, 106, 26, 0.4));
+}
+.badge-disc.badge-club img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.home-heading {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2.4svh 1.5vw 0;
+  gap: 3.2svh;
+}
+.home-title {
+  margin: 0;
+  text-align: center;
+  font-weight: 600;
+  font-size: clamp(12px, 1.35vw, 22px);
+  letter-spacing: 0.2em;
+  line-height: 1.4;
+  text-shadow: 0 0 24px rgba(255, 106, 26, 0.35);
+}
+.home-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 1.2svh clamp(14px, 2.6vw, 44px);
+}
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+}
+.stat-icon {
+  flex: none;
+  width: clamp(30px, 5.2svh, 48px);
+  height: clamp(36px, 7.4svh, 62px);
+  filter: drop-shadow(0 0 10px rgba(255, 150, 60, 0.35));
+}
+.stat-icon-coins {
+  width: clamp(44px, 8.4svh, 70px);
+}
+.stat-icon-info {
+  width: clamp(36px, 6.4svh, 54px);
+  height: clamp(36px, 6.4svh, 54px);
+  color: var(--ink);
+  filter: none;
+}
+.stat-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: clamp(11px, 0.95vw, 14px);
+  line-height: 1.25;
+}
+.stat-label {
+  color: var(--ink-dim);
+  letter-spacing: 0.04em;
+}
+.stat-value {
+  font-weight: 700;
+  font-size: clamp(13px, 1.1vw, 17px);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+.stat-button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 4px 10px 4px 6px;
+  margin: -4px -10px -4px -6px;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 0.35s var(--ease),
+    border-color 0.35s var(--ease),
+    box-shadow 0.35s var(--ease);
+}
+.stat-button:hover,
+.stat-button:focus-visible {
+  background: linear-gradient(90deg, rgba(255, 106, 26, 0.14), rgba(255, 106, 26, 0.03));
+  border-color: rgba(255, 130, 60, 0.32);
+  box-shadow: 0 0 28px -8px rgba(255, 106, 26, 0.55);
+}
+.stat-button:focus-visible {
+  outline: 2px solid rgba(255, 150, 80, 0.7);
+  outline-offset: 2px;
+}
+.stat-button .stat-label {
+  color: var(--ink);
+}
+
+/* ---------- leaderboard ---------- */
+.leaderboard {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 6px 6px 6px 0;
+  padding: 14px 10px 8px;
+  border-radius: 18px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(22px) saturate(1.25);
+  backdrop-filter: blur(22px) saturate(1.25);
+  border: 1px solid var(--line);
+  box-shadow:
+    0 30px 80px -20px rgba(0, 0, 0, 0.8),
+    0 0 60px -18px var(--orange-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  text-align: center;
+  position: relative;
+}
+.leaderboard::before {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 150, 80, 0.85), transparent);
+  opacity: 0.7;
+}
+.lb-title {
+  margin: 0 0 10px;
+  font-weight: 600;
+  font-size: clamp(14px, 1.3vw, 20px);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.lb-me {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 8px 4px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(255, 106, 26, 0.16), rgba(255, 106, 26, 0.04));
+  border: 1px solid rgba(255, 130, 60, 0.32);
+  font-weight: 700;
+  font-size: clamp(13px, 1.1vw, 17px);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+.lb-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 106, 26, 0.5) transparent;
+}
+.lb-scroll:focus-visible {
+  outline: 2px solid rgba(255, 150, 80, 0.7);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+.lb-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: clamp(11px, 0.9vw, 13px);
+  font-variant-numeric: tabular-nums;
+}
+.lb-table col,
+.lb-table th,
+.lb-table td {
+  width: 33.33%;
+}
+.lb-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 0;
+  background: rgb(14 14 20 / 0.92);
+  color: var(--ink-dim);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.92em;
+}
+.lb-table td {
+  height: 26px;
+  padding: 0;
+  color: var(--ink);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.lb-table td:first-child {
+  color: var(--ink-dim);
+}
+.lb-table tr.lb-mine td {
+  background: rgba(255, 106, 26, 0.14);
+  color: var(--ink);
+}
+
+/* ---------- ticket spiral ---------- */
+.spiral-area {
+  min-width: 0;
+  min-height: 0;
+  padding: 0 6%;
+}
+.spiral {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  container-type: size;
+  perspective: 1500px;
+  perspective-origin: 50% 50%;
+  touch-action: pan-y;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.spiral:active {
+  cursor: grabbing;
+}
+.spiral-ring {
+  --tilt: -10deg;
+  --r: clamp(130px, 30cqw, 360px);
+  --tw: clamp(112px, 15cqw, 176px);
+  --th: calc(var(--tw) * 0.42);
+  /* --n = number of tickets; the helix always spans the same height whatever the count. */
+  --pitch: calc((100cqh - var(--th) * 3.4) / (var(--n) - 1));
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--tilt));
+}
+.ticket {
+  --theta: calc(var(--a) + var(--rot));
+  position: absolute;
+  left: calc(var(--tw) / -2);
+  top: calc(var(--th) / -2);
+  width: var(--tw);
+  height: var(--th);
+  padding: 0;
+  display: block;
+  color: var(--ink);
+  font: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  /* The ticket orbits the vertical axis but always faces the viewer (billboard). */
+  transform: translateY(calc((var(--i) - (var(--n) - 1) / 2) * var(--pitch)))
+    rotateY(calc(var(--theta) * 1deg)) translateZ(var(--r)) rotateY(calc(var(--theta) * -1deg))
+    rotateX(calc(var(--tilt) * -1));
+  /* Fade tickets on the far side of the ring. */
+  opacity: calc(0.32 + 0.68 * (1 + cos(calc(var(--theta) * 1deg))) / 2);
+  -webkit-tap-highlight-color: transparent;
+}
+.ticket-shape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.ticket-body {
+  fill: rgba(22, 16, 14, 0.92);
+  stroke: rgba(255, 140, 70, 0.7);
+  stroke-width: 1.5;
+  transition:
+    fill 0.35s var(--ease),
+    stroke 0.35s var(--ease);
+}
+.ticket-perf {
+  stroke: rgba(255, 150, 80, 0.45);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 4;
+}
+.ticket-stub {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 17%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: calc(var(--tw) * 0.1);
+  color: var(--orange);
+}
+.ticket-label {
+  position: absolute;
+  left: 18%;
+  right: 4%;
+  top: 0;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-weight: 600;
+  font-size: calc(var(--tw) * 0.078);
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+}
+.ticket-final .ticket-body {
+  fill: rgba(70, 28, 8, 0.94);
+  stroke: rgba(255, 170, 100, 0.95);
+}
+.ticket.is-unlocked .ticket-body {
+  fill: rgba(60, 30, 12, 0.94);
+}
+.ticket:hover .ticket-body,
+.ticket:focus-visible .ticket-body {
+  fill: rgba(80, 36, 12, 0.96);
+  stroke: rgba(255, 170, 100, 1);
+}
+.ticket:focus-visible {
+  outline: none;
+}
+.ticket:focus-visible .ticket-shape {
+  filter: drop-shadow(0 0 8px rgba(255, 150, 80, 0.9));
+}
+.ticket:hover .ticket-shape {
+  filter: drop-shadow(0 0 14px rgba(255, 106, 26, 0.55));
+}
+
+/* ---------- dialogs ---------- */
+.modal-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(86svh, 720px);
+  padding: 0;
+  display: none;
+  flex-direction: column;
+  color: var(--ink);
+  background: rgb(14 12 16 / 0.94);
+  border: 1px solid rgba(255, 130, 60, 0.35);
+  border-radius: 18px;
+  box-shadow:
+    0 30px 80px -20px rgba(0, 0, 0, 0.9),
+    0 0 60px -18px var(--orange-soft),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.modal-dialog[open] {
+  display: flex;
+  animation: home-dialog-in 0.35s var(--ease);
+}
+.modal-dialog.dialog-wide {
+  width: min(640px, calc(100vw - 32px));
+}
+.modal-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.66);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+@keyframes home-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 26px 28px 8px;
+}
+.dialog-title {
+  margin: 0 0 14px;
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+.dialog-title:focus {
+  outline: none;
+}
+.dialog-text {
+  margin: 0 0 12px;
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.dialog-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 106, 26, 0.5) transparent;
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 28px 24px;
+}
+.btn {
+  appearance: none;
+  flex: 1 1 auto;
+  height: 46px;
+  padding: 0 20px;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+  border: 1px solid rgba(255, 130, 60, 0.32);
+  background: transparent;
+  transition:
+    transform 0.35s var(--ease),
+    background 0.35s var(--ease),
+    border-color 0.35s var(--ease),
+    box-shadow 0.35s var(--ease);
+}
+.btn-primary {
+  background: linear-gradient(90deg, rgba(255, 106, 26, 0.32), rgba(255, 106, 26, 0.12));
+  box-shadow: 0 0 28px -10px rgba(255, 106, 26, 0.7);
+}
+.btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 150, 80, 0.7);
+  box-shadow: 0 0 28px -8px rgba(255, 106, 26, 0.6);
+}
+.btn:active {
+  transform: scale(0.985);
+}
+.btn:focus-visible {
+  outline: 2px solid rgba(255, 150, 80, 0.8);
+  outline-offset: 2px;
+}
+
+/* ---------- small screens: stack everything, page scrolls ---------- */
+@media (max-width: 900px) {
+  .home-layout {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100svh;
+  }
+  .home-main {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 0;
+  }
+  .home-header {
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 16px 0;
+  }
+  .logo-badges {
+    --d: 84px;
+    padding-top: 0;
+  }
+  .home-heading {
+    padding: 14px 0 0;
+    gap: 16px;
+  }
+  .home-title {
+    font-size: 13px;
+  }
+  .stat-text {
+    font-size: 12px;
+  }
+  .spiral-area {
+    height: min(72svh, 560px);
+    min-height: 380px;
+    padding: 12px 0 0;
+  }
+  .spiral-ring {
+    --r: clamp(90px, 27cqw, 220px);
+    --tw: clamp(104px, 33cqw, 170px);
+  }
+  .leaderboard {
+    margin: 12px 12px 16px;
+    max-height: 70svh;
+  }
+}
+@media (max-height: 520px) and (orientation: landscape) and (min-width: 901px) {
+  .logo-badges {
+    --d: 64px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-stage .float {
+    animation: none;
+  }
+  .home-stage .scene {
+    animation-duration: 0.01s;
+  }
+  .modal-dialog[open] {
+    animation: none;
+  }
+  .btn,
+  .stat-button,
+  .ticket-body {
+    transition-duration: 0.01s;
+  }
+}
