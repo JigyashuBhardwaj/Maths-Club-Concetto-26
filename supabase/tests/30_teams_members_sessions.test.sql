@@ -26,8 +26,9 @@ select pg_temp.rejects($s$insert into teams (team_code, name, login_id, password
 select pg_temp.rejects($s$insert into teams (team_code, name, login_id, password_hash, admin_id, coins) values ('T98', 'x', 'x98', 'x', gen_random_uuid(), 500)$s$, '23503');
 -- the balance can never be negative
 select pg_temp.rejects($s$update teams set coins = -1 where team_code = 'T01'$s$, 'teams_coins_check');
--- teams with members cannot be deleted (history is kept)
-select pg_temp.rejects($s$delete from teams where team_code = 'T01'$s$, '23503');
+-- teams with members cannot be deleted (history is kept). The FK is ON DELETE RESTRICT: PostgreSQL 18 reports that as
+-- SQLSTATE 23001 (restrict_violation) where 16/17 report 23503, so the rejection is matched by constraint name instead.
+select pg_temp.rejects($s$delete from teams where team_code = 'T01'$s$, 'team_members_team_id_fkey');
 
 -- roles: exactly one Super Admin; admins are created by staff; no PARTICIPANT staff role
 select pg_temp.rejects($s$insert into staff_users (username, display_name, password_hash, role) values ('second_super', 'x', 'TEST-NOT-A-HASH', 'SUPER_ADMIN')$s$, 'staff_one_super_admin');

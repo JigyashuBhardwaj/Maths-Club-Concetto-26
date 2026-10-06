@@ -153,6 +153,9 @@ test.describe("participant home", () => {
 
   test("spiral turns by itself, pauses while a dialog is open", async ({ page }, info) => {
     test.skip(info.project.name === "mobile", "motion is checked once");
+    // The ring only rests after its frame-driven ease finishes, which takes many wall-clock seconds at software-WebGL
+    // frame rates (~1 fps under load): well beyond the 30 s default there.
+    test.setTimeout(120_000);
     await page.goto("/participant");
     const rot = () =>
       page
@@ -163,7 +166,36 @@ test.describe("participant home", () => {
     const b = await rot();
     expect(b).toBeGreaterThan(a + 0.3);
     await openTicket(page, "THEME A");
-    await page.waitForTimeout(1200); // eased pause
+    await expect(page.getByRole("dialog")).toBeVisible();
+    // The pause is eased and frame-driven: the ring first glides to the opened ticket, then its drift fades to 0.
+    // How long that takes depends on how far the ring had drifted and on the frame rate, so a fixed sleep is not a
+    // stable synchronisation point. Wait until the ring has actually come to rest: moving by less than 0.005 deg per
+    // frame for 5 frames and 400 ms (the time rule keeps the tail of the glide, which also moves very little per
+    // frame on a fast display, from counting as rest). A ring that does not pause keeps drifting at 5 deg/s, never
+    // rests, and fails here.
+    await page.locator(".spiral-ring").evaluate(
+      (el) =>
+        new Promise<void>((resolve, reject) => {
+          const read = () => Number((el as HTMLElement).style.getPropertyValue("--rot"));
+          const deadline = performance.now() + 90_000;
+          let last = read();
+          let frames = 0;
+          let since = performance.now();
+          const frame = () => {
+            const now = read();
+            if (Math.abs(now - last) < 0.005) frames += 1;
+            else {
+              frames = 0;
+              since = performance.now();
+            }
+            last = now;
+            if (frames >= 5 && performance.now() - since >= 400) resolve();
+            else if (performance.now() > deadline) reject(new Error("ring never came to rest"));
+            else requestAnimationFrame(frame);
+          };
+          requestAnimationFrame(frame);
+        }),
+    );
     const c = await rot();
     await page.waitForTimeout(800);
     expect(Math.abs((await rot()) - c)).toBeLessThan(0.5);

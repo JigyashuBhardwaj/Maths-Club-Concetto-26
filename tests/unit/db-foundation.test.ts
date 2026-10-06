@@ -1,7 +1,7 @@
 // Static guards for the database foundation (Patch B). They run without a database; the behavioural
 // constraint tests live in supabase/tests and run with `npm run db:verify` against a scratch PostgreSQL.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -24,9 +24,11 @@ const migrationNames = readdirSync(join(root, "supabase/migrations"))
 const migrations = migrationNames.map((f) => read(`supabase/migrations/${f}`)).join("\n");
 const seed = read("supabase/seed.sql");
 
+// Paths are always POSIX-style ("tests/unit/x.ts"), also on Windows, so they can be compared with the
+// allow/skip lists below (path.join/relative would return backslashes there).
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(join(root, dir))) {
-    const rel = join(dir, name);
+    const rel = join(dir, name).replace(/\\/g, "/");
     if (["node_modules", ".next", "playwright-report", "test-results"].includes(name)) continue;
     if (statSync(join(root, rel)).isDirectory()) walk(rel, out);
     else out.push(rel);
@@ -124,7 +126,7 @@ describe("no stale 4-hour / 12-theme assumptions in architecture, schema, source
     "README.md",
   ]
     .filter((f) => /\.(md|sql|ts|tsx|mjs|css)$/.test(f))
-    .filter((f) => !SKIP.has(relative(root, join(root, f))));
+    .filter((f) => !SKIP.has(f));
 
   const offenders = (re: RegExp) => scanned.filter((f) => re.test(read(f)));
 

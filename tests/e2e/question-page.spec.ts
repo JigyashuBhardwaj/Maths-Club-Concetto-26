@@ -10,10 +10,15 @@ async function startTheme(page: Page, letter = "A") {
   await page.getByRole("button", { name: "Unlock with xyz coins" }).click();
   await page.getByRole("link", { name: "Let's solve" }).click();
   await page.waitForURL(`**/participant/theme/${letter}/1`);
-  await expect(page.getByText("Q1.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Q1.")).toBeVisible({ timeout: 60_000 }); // inside the 90 s test budget below
 }
 
 test.describe("question page", () => {
+  // Every test here pays startTheme() first (/participant -> unlock -> Q1). Under software WebGL the full-size
+  // liquid background leaves the desktop viewport at ~1.5 fps, so that step alone takes 10-15 s and each test
+  // runs 16-30 s, with no headroom under the 30 s default (more under parallel workers). Same assertions, more time.
+  test.describe.configure({ timeout: 90_000 });
+
   test("renders everything from the spec with no console errors", async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
