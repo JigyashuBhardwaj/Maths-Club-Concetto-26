@@ -47,3 +47,15 @@ export async function requireArea(area: Area): Promise<Principal> {
   if (!decision.allow) redirect(decision.redirectTo);
   return decision.principal;
 }
+
+export type StaffPrincipal = Extract<Principal, { role: "ADMIN" | "SUPER_ADMIN" }>;
+
+/**
+ * `requireArea` for the two staff areas, typed to a staff principal (the participant branch cannot happen, because
+ * `decideAccess` only lets the area's own role through; it is handled anyway rather than asserted).
+ */
+export async function requireStaffArea(area: "admin" | "superadmin"): Promise<StaffPrincipal> {
+  const principal = await requireArea(area);
+  if (principal.role === "PARTICIPANT") redirect("/participant");
+  return principal;
+}

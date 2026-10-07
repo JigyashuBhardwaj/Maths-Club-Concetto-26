@@ -289,7 +289,8 @@ test.describe("staff sign-in (browser)", () => {
     await fillStaff(page, staffCredentials("e2e_admin"));
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(reached("/admin"));
-    await expect(page.getByText("Signed in as")).toContainText("E2E Admin");
+    // B12: the Admin shell shows the Admin's user ID (their username), as the Admin dashboard UI specifies.
+    await expect(page.getByText("Signed in as")).toContainText("e2e_admin");
     const cookie = await sessionCookie(page);
     expect(cookie).toMatchObject({ httpOnly: true, secure: true, sameSite: "Lax" });
     const principal = JSON.parse((await me(page)).text) as { data: { role: string } };

@@ -75,6 +75,10 @@ Status: **proposal for review (Milestone 0).** Scope: a time-boxed, high-integri
 * **No browser-side secrets.** The session exists only as the `HttpOnly; Secure; SameSite=Lax` `__Host-session` cookie; nothing is stored in web storage. Sign-in error text is fixed wording (never server text); every wrong-credential case is one message. Logout leaves the page only after the server confirmed the revocation.
 * **Demo identities** (`npm run provision:demo`) are random, hashed in the database, printed once, `demo`-prefixed (so the SEC-12 release check can find them), and refused for non-local hosts, `APP_ENV=production` and databases with real teams. No credential is committed or hard-coded; the browser tests generate throwaway identities per run. See `docs/AUTH_UI.md`.
 
+### 3.4 Provisioning (Patch B12)
+
+The Super Admin creates Admins and an Admin creates Teams through `create_admin` / `create_team` (migration 13). The owner of a team is always the authenticated Admin: request bodies are strict and cannot name an owner, role, balance or status, and the SQL function re-checks the caller's role. An Admin lists only `teams.admin_id = caller`. Passwords are hashed in the database (bcrypt, cost 12) and appear in no response, audit row or `request_log` fingerprint. Creation is one transaction with idempotency keys (scope = staff id) and unique constraints as the race backstop. Details: `PROVISIONING.md`.
+
 ## 4. Authorisation matrix
 
 | Action | Participant | Admin | Super Admin |

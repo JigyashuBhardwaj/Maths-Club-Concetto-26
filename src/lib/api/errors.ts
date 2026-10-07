@@ -17,6 +17,10 @@ export const ERROR_STATUS = {
   COMPETITION_NOT_READY: 409,
   INVALID_COMPETITION_TRANSITION: 409,
   IDEMPOTENCY_KEY_REUSED: 409,
+  USERNAME_TAKEN: 409,
+  TEAM_CODE_TAKEN: 409,
+  LOGIN_ID_TAKEN: 409,
+  ADMISSION_NO_TAKEN: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 
@@ -82,6 +86,10 @@ const DB_ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   COMPETITION_NOT_READY: "The competition is not ready to open.",
   INVALID_COMPETITION_TRANSITION: "That change is not allowed in the current state.",
   IDEMPOTENCY_KEY_REUSED: "This Idempotency-Key was already used for a different request.",
+  USERNAME_TAKEN: "That username is already taken.",
+  TEAM_CODE_TAKEN: "That Team ID is already in use.",
+  LOGIN_ID_TAKEN: "That Login ID is already in use.",
+  ADMISSION_NO_TAKEN: "An admission number is already registered to a team.",
 };
 
 /** Only these codes may carry details, and only flat primitives: counts, state names and field names. */
@@ -89,6 +97,7 @@ const DETAILS_ALLOWED = new Set<ErrorCode>([
   "VALIDATION_FAILED",
   "COMPETITION_NOT_READY",
   "INVALID_COMPETITION_TRANSITION",
+  "ADMISSION_NO_TAKEN",
 ]);
 
 function safeDetails(code: ErrorCode, raw: unknown): Record<string, unknown> | undefined {

@@ -4,7 +4,9 @@
 // database, a Docker daemon or committed credentials. The app is started with NEXT_PUBLIC_SUPABASE_URL pointing here,
 // so the production code path is unchanged: there is no test switch inside the application. This process implements
 // the four authentication functions of migration 11 (participant_login, staff_login, resolve_session, revoke_session)
-// with the same rules and the same JSON result shapes as the SQL. The SQL itself is proven by supabase/tests/70_auth.
+// and the four provisioning functions of migration 13 (create_admin, create_team, list_admin_teams, get_leaderboard)
+// with the same rules and the same JSON result shapes as the SQL. The SQL itself is proven by supabase/tests/70_auth
+// and 90_provisioning (and by the real-PostgreSQL cross-check described in docs/PROVISIONING.md).
 //
 // Fidelity notes (kept deliberately small): throttling constants, "one live session per member", 12 h expiry, the
 // generic INVALID_CREDENTIALS answer, and "participants may log in only while the competition is RUNNING/PAUSED" mirror
@@ -19,12 +21,19 @@ import { pathToFileURL } from "node:url";
 
 const SESSION_MS = 12 * 60 * 60 * 1000;
 
+/** A rejection raised on purpose by a function (SQLSTATE P0001; the message is the stable error code). */
 class AppError extends Error {
   constructor(message, details) {
     super(message);
     this.details = details;
   }
 }
+
+const USERNAME_RE = /^[A-Za-z0-9._-]{3,64}$/;
+const TEAM_CODE_RE = /^[A-Z0-9][A-Z0-9_-]{0,15}$/;
+const ADMISSION_RE = /^[A-Z0-9][A-Z0-9/._-]{0,31}$/;
+const octets = (text) => Buffer.byteLength(text, "utf8");
+const chars = (text) => [...text].length;
 
 function same(a, b) {
   const x = Buffer.from(String(a ?? ""));
@@ -44,6 +53,8 @@ export function createFakeBackend(identities, now = () => Date.now()) {
       { id: randomUUID(), active: true, ...s },
     ]),
   );
+  // The pre-existing teams belong to the first ADMIN of the identities (like a team an Admin created earlier).
+  const firstAdmin = [...staff.values()].find((u) => u.role === "ADMIN");
   const teams = new Map(
     identities.teams.map((t) => [
       t.loginId.toLowerCase(),
@@ -51,11 +62,21 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         id: randomUUID(),
         status: "NOT_STARTED",
         competition: "RUNNING",
+        score: 0,
+        adminId: firstAdmin?.id ?? null,
+        createdAt: now(),
         ...t,
         members: t.members.map((m) => ({ id: randomUUID(), ...m })),
       },
     ]),
   );
+  /** Idempotency records of migration 12/13: `${scope}|${key}` -> { operation, fingerprint, response }. */
+  const requestLog = new Map();
+  /** Audit events written by the provisioning functions (kept only so a test can count them). */
+  const audit = [];
+  /** Admission numbers are unique across ALL teams (team_members.admission_no). */
+  const admissions = new Set(identities.teams.flatMap((t) => t.members.map((m) => m.admissionNo)));
+  const staffById = (id) => [...staff.values()].find((u) => u.id === id);
   /** token hash ("\\x…") -> session */
   const sessions = new Map();
   const throttle = new Map();
@@ -107,7 +128,171 @@ export function createFakeBackend(identities, now = () => Date.now()) {
     };
   }
 
+  // ---- migration 12/13 idempotency helpers ------------------------------------------------------------------------
+  function idemLookup(scope, key, operation, fingerprint) {
+    if (typeof key !== "string" || key === "") {
+      throw new AppError("VALIDATION_FAILED", { fields: ["idempotencyKey"] });
+    }
+    const hit = requestLog.get(`${scope}|${key}`);
+    if (!hit) return null;
+    if (hit.operation !== operation || hit.fingerprint !== fingerprint) {
+      throw new AppError("IDEMPOTENCY_KEY_REUSED");
+    }
+    return hit.response;
+  }
+  const idemStore = (scope, key, operation, fingerprint, response) =>
+    requestLog.set(`${scope}|${key}`, { operation, fingerprint, response });
+
+  const provisioning = {
+    create_admin(a) {
+      const caller = staffById(a.p_staff_id);
+      if (!caller || caller.role !== "SUPER_ADMIN" || !caller.active)
+        throw new AppError("FORBIDDEN");
+      const name = String(a.p_username ?? "").trim();
+      const fingerprint = `username:${name.toLowerCase()}`;
+      const replay = idemLookup(caller.id, a.p_idem_key, "create_admin", fingerprint);
+      if (replay) return { ...replay, replayed: true };
+
+      const fields = [];
+      if (!USERNAME_RE.test(name)) fields.push("username");
+      const pw = a.p_password;
+      if (typeof pw !== "string" || chars(pw) < 10 || octets(pw) > 72) fields.push("password");
+      if (fields.length) throw new AppError("VALIDATION_FAILED", { fields });
+      if (staff.has(name.toLowerCase())) throw new AppError("USERNAME_TAKEN");
+
+      const admin = {
+        id: randomUUID(),
+        username: name,
+        password: pw,
+        displayName: name,
+        role: "ADMIN",
+        active: true,
+        createdBy: caller.id,
+      };
+      staff.set(name.toLowerCase(), admin);
+      audit.push({ type: "ADMIN_CREATED", staffId: caller.id, entityId: admin.id });
+      const response = {
+        replayed: false,
+        admin: { id: admin.id, username: name, role: "ADMIN", is_active: true, created_at: now() },
+      };
+      idemStore(caller.id, a.p_idem_key, "create_admin", fingerprint, response);
+      return response;
+    },
+
+    create_team(a) {
+      const caller = staffById(a.p_staff_id);
+      if (!caller || caller.role !== "ADMIN" || !caller.active) throw new AppError("FORBIDDEN");
+      const code = String(a.p_team_code ?? "")
+        .trim()
+        .toUpperCase();
+      const name = String(a.p_name ?? "").trim();
+      const login = String(a.p_login_id ?? "").trim();
+      const adm =
+        Array.isArray(a.p_admission_nos) && a.p_admission_nos.length === 4
+          ? a.p_admission_nos.map((x) =>
+              String(x ?? "")
+                .trim()
+                .toUpperCase(),
+            )
+          : [];
+      const fingerprint = JSON.stringify([code, name, login.toLowerCase(), adm]);
+      const replay = idemLookup(caller.id, a.p_idem_key, "create_team", fingerprint);
+      if (replay) return { ...replay, replayed: true };
+
+      const fields = [];
+      if (!TEAM_CODE_RE.test(code)) fields.push("teamCode");
+      if (name === "" || chars(name) > 100 || /[\u0000-\u001f\u007f]/.test(name))
+        fields.push("name");
+      if (!USERNAME_RE.test(login)) fields.push("loginId");
+      const pw = a.p_password;
+      if (
+        typeof pw !== "string" ||
+        chars(pw) < 8 ||
+        octets(pw) > 72 ||
+        [code.toLowerCase(), login.toLowerCase()].includes(pw.toLowerCase())
+      ) {
+        fields.push("password");
+      }
+      if (adm.length !== 4) fields.push("admissionNos");
+      else {
+        adm.forEach((value, i) => {
+          if (!ADMISSION_RE.test(value) || adm.slice(0, i).includes(value)) {
+            fields.push(`admissionNos.${i + 1}`);
+          }
+        });
+      }
+      if (fields.length) throw new AppError("VALIDATION_FAILED", { fields });
+
+      if ([...teams.values()].some((t) => t.code === code)) throw new AppError("TEAM_CODE_TAKEN");
+      if (teams.has(login.toLowerCase())) throw new AppError("LOGIN_ID_TAKEN");
+      const taken = adm.findIndex((x) => admissions.has(x));
+      if (taken >= 0) throw new AppError("ADMISSION_NO_TAKEN", { slot: taken + 1 });
+
+      const team = {
+        id: randomUUID(),
+        code,
+        name,
+        loginId: login,
+        password: pw,
+        status: "NOT_STARTED",
+        competition: "RUNNING",
+        score: 0,
+        coins: 500,
+        adminId: caller.id,
+        createdAt: now(),
+        members: adm.map((admissionNo, i) => ({ id: randomUUID(), slot: i + 1, admissionNo })),
+      };
+      teams.set(login.toLowerCase(), team);
+      for (const x of adm) admissions.add(x);
+      audit.push({ type: "TEAM_CREATED", staffId: caller.id, entityId: team.id });
+      const response = {
+        replayed: false,
+        team: {
+          id: team.id,
+          team_code: code,
+          name,
+          login_id: login,
+          status: "NOT_STARTED",
+          coins: 500,
+          member_count: 4,
+          created_at: team.createdAt,
+        },
+      };
+      idemStore(caller.id, a.p_idem_key, "create_team", fingerprint, response);
+      return response;
+    },
+
+    list_admin_teams(a) {
+      const caller = staffById(a.p_staff_id);
+      if (!caller || caller.role !== "ADMIN" || !caller.active) throw new AppError("FORBIDDEN");
+      return {
+        teams: [...teams.values()]
+          .filter((t) => t.adminId === caller.id)
+          .sort((x, y) => x.createdAt - y.createdAt || (x.code < y.code ? -1 : 1))
+          .map((t) => ({
+            id: t.id,
+            team_code: t.code,
+            name: t.name,
+            login_id: t.loginId,
+            status: t.status,
+            member_count: t.members.length,
+            created_at: t.createdAt,
+          })),
+      };
+    },
+
+    get_leaderboard(a) {
+      const caller = staffById(a.p_staff_id);
+      if (!caller || !caller.active) throw new AppError("FORBIDDEN");
+      const ranked = [...teams.values()].sort(
+        (x, y) => y.score - x.score || (x.code < y.code ? -1 : x.code > y.code ? 1 : 0),
+      );
+      return { rows: ranked.map((t, i) => ({ rank: i + 1, team_id: t.code, score: t.score })) };
+    },
+  };
+
   const functions = {
+    ...provisioning,
     participant_login(a) {
       needHash(a.p_token_hash);
       const key = `team:${String(a.p_login_id ?? "")
@@ -236,6 +421,23 @@ export function createFakeBackend(identities, now = () => Date.now()) {
       u.active = Boolean(active);
       return { ok: true };
     },
+    /** Row counts, so a test can prove that a retry or a rejected request created nothing. */
+    counts() {
+      return {
+        staff: staff.size,
+        teams: teams.size,
+        members: [...teams.values()].reduce((n, t) => n + t.members.length, 0),
+        audit: audit.length,
+        requests: requestLog.size,
+      };
+    },
+    /** Sets a team's stored score (the leaderboard reads it; scoring itself is a later milestone). */
+    setScore({ code, score }) {
+      const team = [...teams.values()].find((t) => t.code === code);
+      if (!team) throw new AppError("unknown team");
+      team.score = Number(score);
+      return { ok: true };
+    },
     /** Number of non-revoked, non-expired sessions of an account (so a test can assert that logout revoked it). */
     /** @param {{ username?: string, admissionNo?: string }} who */
     liveSessions({ username, admissionNo }) {
@@ -317,7 +519,12 @@ export function createFakeServer({ identities, serviceKey }) {
     } catch (err) {
       if (err instanceof AppError) {
         // PostgREST maps `raise exception` (SQLSTATE P0001) to HTTP 400 with {code, message, details, hint}.
-        return send(res, 400, { code: "P0001", message: err.message, details: null, hint: null });
+        return send(res, 400, {
+          code: "P0001",
+          message: err.message,
+          details: err.details ? JSON.stringify(err.details) : null,
+          hint: null,
+        });
       }
       return send(res, 500, { message: "fake backend error" });
     }

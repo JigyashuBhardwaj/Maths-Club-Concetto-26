@@ -24,13 +24,21 @@ export async function postJson<T>(
   url: string,
   body?: unknown,
   fetchImpl: typeof fetch = fetch,
+  /** Extra request headers, e.g. the `Idempotency-Key` of a state-changing call. */
+  extraHeaders?: Record<string, string>,
 ): Promise<ApiResult<T>> {
   let response: Response;
   try {
     response = await fetchImpl(url, {
       method: "POST",
       credentials: "same-origin",
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers:
+        body === undefined && !extraHeaders
+          ? undefined
+          : {
+              ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+              ...extraHeaders,
+            },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
