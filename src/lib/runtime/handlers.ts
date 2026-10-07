@@ -28,7 +28,11 @@ export type RuntimeDeps = AuthDeps;
 const FAULT = () => new ApiError("SERVICE_UNAVAILABLE", "Temporarily unavailable. Please retry.");
 
 /** One database call; an error the engine raised on purpose becomes its API error, anything else a generic 503. */
-async function callDb(db: Db, fn: DbFunction, args: Record<string, unknown>): Promise<unknown> {
+export async function callDb(
+  db: Db,
+  fn: DbFunction,
+  args: Record<string, unknown>,
+): Promise<unknown> {
   try {
     return await db.rpc(fn, args);
   } catch (err) {
@@ -38,7 +42,7 @@ async function callDb(db: Db, fn: DbFunction, args: Record<string, unknown>): Pr
 }
 
 /** A malformed database result is an infrastructure fault, never something to forward. */
-function parseResult<S extends z.ZodType>(schema: S, raw: unknown): z.infer<S> {
+export function parseResult<S extends z.ZodType>(schema: S, raw: unknown): z.infer<S> {
   const parsed = schema.safeParse(raw);
   if (!parsed.success) throw FAULT();
   return parsed.data;

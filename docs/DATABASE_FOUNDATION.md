@@ -8,7 +8,7 @@ TypeScript.
 ## Layout
 
 ```
-supabase/migrations/   12 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions, runtime engine)
+supabase/migrations/   13 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions, runtime engine, provisioning)
 supabase/seed.sql      configuration + content only: 1 competition, 10 themes A–J, 50 questions, 150 buy-time options, 100 hints, placeholder keys
 supabase/tests/        plain-SQL tests (assert / rejects()); run by scripts/db-verify.mjs
 supabase/tests/concurrency/  multi-connection tests (*.concurrency.mjs, parallel psql sessions); run by scripts/db-verify.mjs

@@ -38,21 +38,23 @@ function walk(dir: string, out: string[] = []): string[] {
 
 describe("migrations", () => {
   it("are ordered, uniquely numbered and complete", () => {
-    expect(migrationNames).toHaveLength(12);
+    expect(migrationNames).toHaveLength(13);
     for (const f of migrationNames) expect(f).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
     expect(new Set(migrationNames.map((f) => f.slice(0, 14))).size).toBe(migrationNames.length);
     expect(migrationNames[0]).toContain("extensions_enums_clock");
-    expect(migrationNames.at(-4)).toContain("security_rls");
-    expect(migrationNames.at(-3)).toContain("buy_time_options");
-    expect(migrationNames.at(-2)).toContain("auth_functions");
-    expect(migrationNames.at(-1)).toContain("runtime_engine");
+    expect(migrationNames.at(-5)).toContain("security_rls");
+    expect(migrationNames.at(-4)).toContain("buy_time_options");
+    expect(migrationNames.at(-3)).toContain("auth_functions");
+    expect(migrationNames.at(-2)).toContain("runtime_engine");
+    expect(migrationNames.at(-1)).toContain("provisioning");
   });
 
-  // B9 (auth_functions) and B10 (runtime_engine): each function is explicitly revoked from PUBLIC and granted to
+  // B9 (auth_functions), B10 (runtime_engine) and B12 (provisioning): each function is explicitly revoked from PUBLIC and granted to
   // service_role only, and every SECURITY DEFINER function pins its search_path.
   for (const [suffix, minFunctions] of [
     ["auth_functions", 11],
     ["runtime_engine", 12],
+    ["provisioning", 4],
   ] as const) {
     it(`restrict every ${suffix} function explicitly: revoke from PUBLIC/anon/authenticated, grant to service_role`, () => {
       const file = migrationNames.find((f) => f.includes(suffix)) ?? "";

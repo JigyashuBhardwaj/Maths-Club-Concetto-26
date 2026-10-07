@@ -1,12 +1,15 @@
-import { PlaceholderPage } from "@/components/shell/placeholder-page";
-import { requireArea } from "@/lib/auth/guard";
+import { StaffHome } from "@/components/provisioning/staff-home";
+import { requireStaffArea } from "@/lib/auth/guard";
+import { loadLeaderboard } from "@/lib/provisioning/server-data";
 
 export default async function Page() {
-  await requireArea("admin");
+  const principal = await requireStaffArea("admin");
+  const rows = await loadLeaderboard(principal.staff.id);
   return (
-    <PlaceholderPage
+    <StaffHome
       title="Admin"
-      description="The admin interface (assigned teams, review queue, hints) is not built yet. This route only demonstrates the shell."
+      description="Use Create a team in the sidebar to add a team, and My teams to see the teams you created. The live leaderboard of every team is on the right."
+      rows={rows}
     />
   );
 }

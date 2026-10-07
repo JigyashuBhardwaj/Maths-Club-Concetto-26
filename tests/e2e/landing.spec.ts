@@ -104,14 +104,16 @@ test.describe("landing page", () => {
 test.describe("placeholders and platform", () => {
   test("shell routes render", async ({ page }) => {
     // The shells are protected routes (B11): each is opened by the role that owns it, signed in for real.
-    for (const [path, who] of [
-      ["/admin", "e2e_admin"],
-      ["/superadmin", "e2e_super"],
+    // B12 replaced the placeholder cards with the staff homes: a welcome card and the live leaderboard.
+    for (const [path, who, title] of [
+      ["/admin", "e2e_admin", "Admin"],
+      ["/superadmin", "e2e_super", "Superadmin"],
     ] as const) {
       await page.context().clearCookies();
       await signInStaff(page, who);
       await page.goto(path);
-      await expect(page.getByText("Placeholder", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Live Leaderboard" })).toBeVisible();
     }
   });
 

@@ -3,12 +3,15 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { SignOutButton } from "@/components/auth/sign-out-button";
+import { NAV_ITEM_CLASS } from "@/components/shell/nav-item-class";
 import { getRole, loginPath, type RoleId } from "@/lib/roles";
 
 export interface ShellNavItem {
   label: string;
-  /** Present only once the destination exists. Items without it render as disabled placeholders. */
+  /** Present only once the destination exists. Items without it (and without `node`) render as disabled placeholders. */
   href?: string;
+  /** A ready-made entry (a client component such as a dialog trigger) rendered in place of the link. */
+  node?: ReactNode;
 }
 
 interface AppShellProps {
@@ -38,11 +41,10 @@ export function AppShell({ role, nav, userName, children }: AppShellProps) {
           <ul className="grid gap-1">
             {nav.map((item) => (
               <li key={item.label}>
-                {item.href ? (
-                  <Link
-                    href={item.href}
-                    className="block rounded-row px-3 py-2.5 text-sm text-ink-dim hover:text-ink"
-                  >
+                {item.node ? (
+                  item.node
+                ) : item.href ? (
+                  <Link href={item.href} className={NAV_ITEM_CLASS}>
                     {item.label}
                   </Link>
                 ) : (

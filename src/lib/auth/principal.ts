@@ -18,7 +18,7 @@ export type Principal =
       role: "ADMIN" | "SUPER_ADMIN";
       sessionId: string;
       expiresAt: number;
-      staff: { id: string; name: string };
+      staff: { id: string; name: string; username: string };
     };
 
 /** Validates a `resolve_session` / login result from the database and turns it into a principal. */
@@ -32,7 +32,11 @@ export function parsePrincipal(raw: unknown): Principal {
   if (r.role === "PARTICIPANT") {
     return { role: "PARTICIPANT", ...base, member: r.member, team: r.team };
   }
-  return { role: r.role, ...base, staff: { id: r.staff.id, name: r.staff.display_name } };
+  return {
+    role: r.role,
+    ...base,
+    staff: { id: r.staff.id, name: r.staff.display_name, username: r.staff.username },
+  };
 }
 
 /** The `data` shape returned to the client by login and `GET /api/auth/me`. */

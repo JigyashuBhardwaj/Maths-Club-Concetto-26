@@ -1,12 +1,15 @@
-import { PlaceholderPage } from "@/components/shell/placeholder-page";
-import { requireArea } from "@/lib/auth/guard";
+import { StaffHome } from "@/components/provisioning/staff-home";
+import { requireStaffArea } from "@/lib/auth/guard";
+import { loadLeaderboard } from "@/lib/provisioning/server-data";
 
 export default async function Page() {
-  await requireArea("superadmin");
+  const principal = await requireStaffArea("superadmin");
+  const rows = await loadLeaderboard(principal.staff.id);
   return (
-    <PlaceholderPage
+    <StaffHome
       title="Superadmin"
-      description="The super-admin interface (admin management, team assignment, UFM, audit log) is not built yet. This route only demonstrates the shell."
+      description="Use Create admin in the sidebar to add an Admin who can sign in and create teams. The live leaderboard of every team is on the right."
+      rows={rows}
     />
   );
 }

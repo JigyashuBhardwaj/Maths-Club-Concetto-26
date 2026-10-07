@@ -12,7 +12,11 @@ export type DbFunction =
   | "revoke_session"
   | "start_team_competition"
   | "get_team_state"
-  | "set_competition_status";
+  | "set_competition_status"
+  | "create_admin"
+  | "create_team"
+  | "list_admin_teams"
+  | "get_leaderboard";
 
 export interface Db {
   /** Calls one database function and returns its JSON result. Throws `DbError` on any transport/database error. */

@@ -33,6 +33,10 @@ Status: **proposal for review (Milestone 0).** Contract-first: the zod schemas i
 | COMPETITION_NOT_READY | 409 | `open` refused: no team yet, or the content is not exactly 10 themes × 50 questions with exactly 5 questions in every theme; `details: {teams, themes, questions, themes_not_five}` |
 | INVALID_COMPETITION_TRANSITION | 409 | The action is not legal from the current status; `details: {from, action}` |
 | IDEMPOTENCY_KEY_REUSED | 409 | The same `Idempotency-Key` was already used for a different operation, member or parameter |
+| USERNAME_TAKEN | 409 | **B12.** An Admin with that username (case-insensitive) already exists |
+| TEAM_CODE_TAKEN | 409 | **B12.** A team with that Team ID already exists |
+| LOGIN_ID_TAKEN | 409 | **B12.** A team with that Login ID (case-insensitive) already exists |
+| ADMISSION_NO_TAKEN | 409 | **B12.** An admission number already belongs to a team; `details: {slot}` names the member (1–4) |
 | TEAM_NOT_STARTED / TEAM_ENDED | 409 | Terminal or not-yet-started team |
 | ALREADY_SUBMITTED | 409 | "Team already submitted." |
 | THEME_ALREADY_UNLOCKED | 409 | No charge made |
@@ -94,7 +98,7 @@ Details of the implemented endpoints:
 | `POST /api/p/questions/:questionId/submit` | `{answer, explanation}` | `submit_answer` | Server validates lengths again; answer required |
 | `POST /api/p/final-submit` | `{confirm:true}` | `final_submit` | `ALREADY_SUBMITTED` for the losing caller |
 | `POST /api/p/heartbeat` | — | updates `sessions.last_seen_at` | Every 25 s; returns `server_now` and `state_version` (so a heartbeat doubles as a cheap "did anything change?" check) |
-| `GET /api/leaderboard` | — | reads `leaderboard_snapshot` | All roles. CDN-cacheable (`s-maxage=20`) |
+| `GET /api/leaderboard` | — | reads `leaderboard_snapshot` | All roles. CDN-cacheable (`s-maxage=20`). **B12 implements only the staff variant** (`get_leaderboard`): Admin and Super Admin, `data: {rows:[{rank, team_id, score}]}` over every team, not cached; a participant gets `403` until the participant variant is built. See `PROVISIONING.md` |
 
 `submit` and `draft` bodies are limited to 20 KB. The API **never** returns another team's data, other teams' answers, a locked question's body, or any `question_keys` content.
 
@@ -104,13 +108,13 @@ An admin is authorised for a team iff `teams.admin_id = principal.staff_id`. The
 
 | Method & path | Body | Engine function | Notes |
 |---------------|------|-----------------|-------|
-| `GET /api/admin/teams` | — | `list_admin_teams` | Assigned teams with status, score, members online, per-theme cell states, pending count (the matrix) |
+| `GET /api/admin/teams` | — | `list_admin_teams` | Assigned teams with status, score, members online, per-theme cell states, pending count (the matrix). **B12 implements the ownership foundation:** `data: {teams:[{id, team_code, name, login_id, status, member_count, created_at}]}` for the caller's own teams; ADMIN only (a Super Admin gets `403`); presence, scores and the matrix come later |
 | `GET /api/admin/teams/:teamId` | — | `get_admin_team` | One team in detail: theme/question grid, history |
 | `GET /api/admin/queue` | `?cursor` | `list_pending_submissions` | Oldest-first pending submissions for this admin's teams |
 | `GET /api/admin/submissions/:id` | — | `get_submission_for_review` | Includes the question body **and** `question_keys` (reference answer, notes) — reviewers only |
 | `POST /api/admin/submissions/:id/approve` | — | `approve_submission` | Reward is fixed by the question, not chosen |
 | `POST /api/admin/submissions/:id/disapprove` | `{note?}` | `disapprove_submission` | Keeps the rejected row; keeps the draft |
-| `POST /api/admin/teams` | `{teamCode, name, loginId, password, confirmPassword, admissionNos[1..4]}` | `create_team` | Server checks password match, strength, uniqueness of `teamCode`, `loginId`, every `admissionNo`; assigns to caller; grants 500 coins as an `INITIAL_GRANT` ledger row |
+| `POST /api/admin/teams` | `{teamCode, name, loginId, password, confirmPassword, admissionNos[1..4]}` | `create_team` | Server checks password match, strength, uniqueness of `teamCode`, `loginId`, every `admissionNo`; assigns to caller; grants 500 coins as an `INITIAL_GRANT` ledger row. **Implemented in B12.** ADMIN only; `Idempotency-Key` required; exactly four admission numbers (M1–M4); strict body (no `adminId`/`coins`); `data: {team:{id, team_code, name, login_id, status, coins, member_count, created_at}}`; `Idempotent-Replay: true` on a replay; `409 TEAM_CODE_TAKEN / LOGIN_ID_TAKEN / ADMISSION_NO_TAKEN`. See `PROVISIONING.md` |
 | `POST /api/admin/teams/:teamId/password` | `{newPassword}` | `reset_team_password` | Added (not in brief): needed when a team forgets credentials mid-event; audited |
 | `POST /api/admin/teams/:teamId/ufm/prepare` | `{action:'RESET_SCORE'\|'DISQUALIFY'}` | creates `ufm_challenges` row | Step 1; returns `{challengeId, expires_at}` (60 s) |
 | `POST /api/admin/teams/:teamId/ufm/confirm` | `{challengeId}` | `reset_score` / `disqualify_team` | Step 2. The UI also shows its own two-step dialog; this makes the server enforce it. `RESET_SCORE` makes the score 0 from now on (baseline) and the team **continues**; `DISQUALIFY` sets −1201 and **freezes** the team |
@@ -119,7 +123,7 @@ An admin is authorised for a team iff `teams.admin_id = principal.staff_id`. The
 
 | Method & path | Body | Engine function | Notes |
 |---------------|------|-----------------|-------|
-| `POST /api/super/admins` | `{username, displayName, password}` | `create_admin` | There is **no** public registration route anywhere |
+| `POST /api/super/admins` | `{username, password, confirmPassword}` | `create_admin` | There is **no** public registration route anywhere. **Implemented in B12:** Super Admin only; `Idempotency-Key` required; role is always ADMIN and the account is active; `display_name` is set to the username (no `displayName` field); `data: {admin:{id, username, role, is_active, created_at}}`; `409 USERNAME_TAKEN` |
 | `PATCH /api/super/admins/:id` | `{isActive}` | `set_admin_active` | Disabling revokes that admin's sessions and reassigns nothing automatically; the UI prompts to reassign (`DEC-24`) |
 | `POST /api/super/teams/:teamId/reassign` | `{adminId}` | `reassign_team` | Audited |
 | `POST /api/super/competition/status` | `{action:'open'\|'pause'\|'resume'\|'end', confirm:true}` (strict) | `set_competition_status` | **Implemented in B10.** Super Admin only (an Admin gets `403`). Requires `Idempotency-Key`. `data: {changed, action, from, to, paused_seconds?, teams_shifted?, teams_ended?, teams_total?, competition:{status, opened_at, paused_at, ended_at, state_version}}`. Legal: `open` from `SETUP`, `pause` from `RUNNING`, `resume` from `PAUSED`, `end` from `RUNNING`/`PAUSED`; asking for the status the competition already has is a no-op (`changed:false`); anything else is `409 INVALID_COMPETITION_TRANSITION`. See `STATE_MACHINE.md` §2 |
