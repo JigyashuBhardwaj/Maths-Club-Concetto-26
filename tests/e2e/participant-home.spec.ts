@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import type { Page } from "@playwright/test";
 
+import { signInSharedParticipant } from "./support/session";
+
 /** The ring is always drifting, so open a ticket the way a keyboard user would: focus it, press Enter. */
 async function openTicket(page: Page, name: string) {
   const ticket = page.getByRole("button", { name });
@@ -12,6 +14,11 @@ async function openTicket(page: Page, name: string) {
 const ticketNames = [..."ABCDEFGHIJ"].map((c) => `THEME ${c}`);
 
 test.describe("participant home", () => {
+  // /participant is a protected route (B11): every test here starts from a real signed-in participant session.
+  test.beforeEach(async ({ page }, info) => {
+    await signInSharedParticipant(page, info);
+  });
+
   test("renders everything from the spec with no console errors", async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -239,6 +246,7 @@ test.describe("participant home", () => {
       reducedMotion: "reduce",
       viewport: { width: 1440, height: 810 },
     });
+    await signInSharedParticipant(ctx, info); // this test builds its own context, so it signs in itself
     const page = await ctx.newPage();
     await page.goto(
       new URL("/participant", info.project.use.baseURL ?? "http://localhost:3100").toString(),

@@ -2,7 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { getRole, type RoleId } from "@/lib/roles";
+import { SignOutButton } from "@/components/auth/sign-out-button";
+import { getRole, loginPath, type RoleId } from "@/lib/roles";
 
 export interface ShellNavItem {
   label: string;
@@ -13,15 +14,17 @@ export interface ShellNavItem {
 interface AppShellProps {
   role: RoleId;
   nav: readonly ShellNavItem[];
+  /** Display name of the signed-in staff member (from the server-side session), shown above the sign-out button. */
+  userName?: string;
   children: ReactNode;
 }
 
 /**
  * Structural frame for the future participant / admin / super-admin interfaces:
- * brand header, role-specific navigation, content area. PLACEHOLDER — it performs no
- * authentication or authorization; a later patch must guard these routes server-side.
+ * brand header, role-specific navigation, content area, sign-out. It performs no authorization itself: the layouts
+ * that render it call `requireArea` on the server first (B11), so it is only ever rendered for the matching role.
  */
-export function AppShell({ role, nav, children }: AppShellProps) {
+export function AppShell({ role, nav, userName, children }: AppShellProps) {
   const { label } = getRole(role);
 
   return (
@@ -54,6 +57,14 @@ export function AppShell({ role, nav, children }: AppShellProps) {
             ))}
           </ul>
         </nav>
+        <div className="mt-auto grid gap-3">
+          {userName ? (
+            <p className="text-xs text-ink-dim">
+              Signed in as <span className="font-semibold text-ink">{userName}</span>
+            </p>
+          ) : null}
+          <SignOutButton redirectTo={loginPath(role)} />
+        </div>
       </aside>
       <main className="flex-1 p-6 md:p-10">{children}</main>
     </div>

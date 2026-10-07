@@ -58,19 +58,28 @@ export function principalToData(p: Principal): AuthPrincipalData {
 }
 
 /**
- * Cookie -> principal. Authorisation always starts here: the role and the team come from the session row, never from
- * the request body, path or headers (SEC-03). Every dead, expired, revoked or unknown token is the same 401.
+ * Session token -> principal, shared by the API (`resolvePrincipal`) and the server-rendered route guard. The role and
+ * the team come from the session row, never from the request body, path or headers (SEC-03). Every dead, expired,
+ * revoked or unknown token is the same 401.
  */
-export async function resolvePrincipal(
+export async function resolvePrincipalFromToken(
   db: Db,
-  request: Request,
+  token: string | null,
   pepper: string,
 ): Promise<Principal> {
-  const token = readSessionToken(request.headers.get("cookie"));
   if (!token) throw new ApiError("UNAUTHENTICATED", "Not signed in.");
   const raw = await db.rpc("resolve_session", { p_token_hash: hashSessionToken(token, pepper) });
   if (typeof raw === "object" && raw !== null && (raw as { ok?: unknown }).ok === false) {
     throw new ApiError("UNAUTHENTICATED", "Not signed in.");
   }
   return parsePrincipal(raw);
+}
+
+/** Cookie header -> principal. Authorisation always starts here (or in `resolvePrincipalFromToken`). */
+export async function resolvePrincipal(
+  db: Db,
+  request: Request,
+  pepper: string,
+): Promise<Principal> {
+  return resolvePrincipalFromToken(db, readSessionToken(request.headers.get("cookie")), pepper);
 }

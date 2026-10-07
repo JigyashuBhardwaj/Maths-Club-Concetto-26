@@ -19,6 +19,7 @@
     "db:verify": "node scripts/db-verify.mjs",
     "db:evidence": "node scripts/db-evidence.mjs",
     "provision:superadmin": "node scripts/provision-superadmin.mjs",
+    "provision:demo": "node scripts/provision-demo-identities.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run hygiene"
   },
   "engines": {

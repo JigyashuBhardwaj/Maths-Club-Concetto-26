@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { signInStaff } from "./support/session";
+
 test.describe("landing page", () => {
   test("renders with no console or page errors and loads every asset", async ({ page }) => {
     const errors: string[] = [];
@@ -101,7 +103,13 @@ test.describe("landing page", () => {
 
 test.describe("placeholders and platform", () => {
   test("shell routes render", async ({ page }) => {
-    for (const path of ["/admin", "/superadmin"]) {
+    // The shells are protected routes (B11): each is opened by the role that owns it, signed in for real.
+    for (const [path, who] of [
+      ["/admin", "e2e_admin"],
+      ["/superadmin", "e2e_super"],
+    ] as const) {
+      await page.context().clearCookies();
+      await signInStaff(page, who);
       await page.goto(path);
       await expect(page.getByText("Placeholder", { exact: true })).toBeVisible();
     }

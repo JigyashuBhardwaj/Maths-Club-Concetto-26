@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { signInSharedParticipant } from "./support/session";
+
 /** Unlock a theme the way a member does: open its ticket on the home page, unlock, "Let's solve". */
 async function startTheme(page: Page, letter = "A") {
   await page.goto("/participant");
@@ -14,6 +16,11 @@ async function startTheme(page: Page, letter = "A") {
 }
 
 test.describe("question page", () => {
+  // The question pages are protected routes (B11): every test here starts from a real signed-in participant session.
+  test.beforeEach(async ({ page }, info) => {
+    await signInSharedParticipant(page, info);
+  });
+
   // Every test here pays startTheme() first (/participant -> unlock -> Q1). Under software WebGL the full-size
   // liquid background leaves the desktop viewport at ~1.5 fps, so that step alone takes 10-15 s and each test
   // runs 16-30 s, with no headroom under the 30 s default (more under parallel workers). Same assertions, more time.

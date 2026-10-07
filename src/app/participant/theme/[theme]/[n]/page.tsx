@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { QuestionPage } from "@/components/question/question-page";
+import { requireArea } from "@/lib/auth/guard";
 import { THEME_IDS, type ThemeId } from "@/lib/home/themes";
 import { QUESTIONS_PER_THEME } from "@/lib/question/constants";
 
@@ -21,6 +22,7 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
 }
 
 export default async function Page({ params }: { params: Promise<Params> }) {
+  await requireArea("participant");
   const { theme, n } = await params;
   const id = THEME_IDS.find((t) => t === theme) as ThemeId | undefined;
   const num = Number(n);

@@ -637,3 +637,18 @@
     transition-duration: 0.01s;
   }
 }
+
+/* ---------- sign-out (B11): pinned to the corner, outside the page grid so no layout fraction moves ---------- */
+.home-signout {
+  position: fixed;
+  left: 10px;
+  bottom: 6px;
+  z-index: 6;
+  width: max-content;
+}
+.home-signout button {
+  background: rgb(5 5 7 / 0.72);
+  padding: 5px 10px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+}

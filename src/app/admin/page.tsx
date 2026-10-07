@@ -1,6 +1,8 @@
 import { PlaceholderPage } from "@/components/shell/placeholder-page";
+import { requireArea } from "@/lib/auth/guard";
 
-export default function Page() {
+export default async function Page() {
+  await requireArea("admin");
   return (
     <PlaceholderPage
       title="Admin"

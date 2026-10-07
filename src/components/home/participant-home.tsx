@@ -1,3 +1,4 @@
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { MOCK_COINS_LEFT, MOCK_TEAM, MOCK_TIME_LEFT_SECONDS } from "@/lib/home/mock";
 
 import { HomeHeader } from "./home-header";
@@ -12,6 +13,7 @@ import { TicketSpiral } from "./ticket-spiral";
 export function ParticipantHome() {
   return (
     <HomeStage>
+      <SignOutButton redirectTo="/login/participant" className="home-signout" />
       <div className="home-layout">
         <main className="home-main">
           <HomeHeader timeLeftSeconds={MOCK_TIME_LEFT_SECONDS} coinsLeft={MOCK_COINS_LEFT} />

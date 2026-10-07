@@ -67,6 +67,14 @@ Status: **proposal for review (Milestone 0).** Scope: a time-boxed, high-integri
 * **Errors:** the engine raises stable codes; the API maps them. Anything else from the database is a generic `503`: raw PostgreSQL text never reaches a client or a log.
 * **Audit:** `COMPETITION_STATUS_CHANGED`, `TEAM_STARTED`, `TEAM_ENDED`, carrying actor, ids, times and the idempotency key as `request_id`. Rejected requests are not audited (the architecture does not require it, and a rolled-back transaction cannot write).
 
+### 3.3 Route guards and sign-in UI (Patch B11)
+
+* **Server-authoritative.** `/participant/*`, `/admin/*` and `/superadmin/*` are guarded on the server by `requireArea` (layout and page), which resolves the cookie through the same `resolve_session` function as `GET /api/auth/me` and compares the **session's** role with the area. Nothing the browser says (path, form, header, storage) selects a role; a client-side redirect is never the control. `src/proxy.ts` is only a database-free pre-filter (no well-formed cookie → sign-in page; protected responses `Cache-Control: no-store`).
+* **Role isolation:** each role owns one area with no inheritance; a denied request is a redirect (to sign-in when anonymous, to the caller's own home otherwise) and never renders protected content.
+* **Fail closed on uncertainty.** If the database cannot say who a caller is, a protected page returns a generic `500`; it neither renders nor redirects as if the answer were known. The sign-in page still renders.
+* **No browser-side secrets.** The session exists only as the `HttpOnly; Secure; SameSite=Lax` `__Host-session` cookie; nothing is stored in web storage. Sign-in error text is fixed wording (never server text); every wrong-credential case is one message. Logout leaves the page only after the server confirmed the revocation.
+* **Demo identities** (`npm run provision:demo`) are random, hashed in the database, printed once, `demo`-prefixed (so the SEC-12 release check can find them), and refused for non-local hosts, `APP_ENV=production` and databases with real teams. No credential is committed or hard-coded; the browser tests generate throwaway identities per run. See `docs/AUTH_UI.md`.
+
 ## 4. Authorisation matrix
 
 | Action | Participant | Admin | Super Admin |
