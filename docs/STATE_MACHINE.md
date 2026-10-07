@@ -18,6 +18,8 @@ Every operation that touches a team runs these steps first, in this order:
 6. **Question expiry**: for this team's `ACTIVE` rows with `timer_deadline <= app.now()`, set `state='TIMED_OUT'`, `timed_out_at = timer_deadline`, `timer_deadline = NULL`.
 7. Only then run the operation's own checks.
 
+**Implementation note (B10):** the single primitive is `app.lock_team(team_id)`. It takes the `competition` row `FOR SHARE` and then the `teams` row `FOR UPDATE`. The share lock is the "read" of step 3 made safe: while an operation runs the competition status cannot change under it (a start can never slip through a concurrent pause), yet any number of participants proceed in parallel. `set_competition_status` takes `competition FOR UPDATE` and then every team in `id` order, so the order competition → team holds everywhere and no cycle exists. Rejections are raised as `P0001` with the code as the message and roll the transaction back; only successes are stored for idempotency.
+
 **Lock order** is always `competition` (read, no lock) → `teams` row → `team_questions` rows (by `question_id` ascending) → insert rows. Admin operations find the team through the submission, lock the **team first**, then re-read the submission. Because every path locks the team first, deadlocks cannot occur.
 
 ### 1.2 The common epilogue
@@ -64,6 +66,15 @@ While `PAUSED`: all participant mutations return `COMPETITION_PAUSED`; admin rev
 
 `SETUP` is the pre-event state: staff can log in and create teams, participants cannot enter (`DEC-02`).
 
+**Implemented in B10 (`set_competition_status(staff_id, action, idempotency_key)`):**
+
+* Authority: an active `SUPER_ADMIN` only, re-checked inside the function.
+* Asking for the status the competition already has (`open`/`resume` while `RUNNING`, `pause` while `PAUSED`, `end` while `ENDED`) is an idempotent no-op: `changed:false`, no change to competition or team state, no audit row, no version bump. The successful no-op response is still stored in `request_log` for idempotent replay (that row is not a state mutation); a rejected request is rolled back and stores nothing. Any other illegal request is `INVALID_COMPETITION_TRANSITION`.
+* `open` is refused with `COMPETITION_NOT_READY` unless there is at least one team, exactly 10 themes, exactly 50 questions, and exactly 5 questions in every theme (the totals alone are not enough: 4 + 6 would pass them). `details: {teams, themes, questions, themes_not_five}`.
+* Every real change bumps `competition.state_version` and the `state_version` of every team (the competition status is part of each team's snapshot) and audits `COMPETITION_STATUS_CHANGED {from, to, action, …}`.
+* `resume` shifts `ends_at` of every `RUNNING` team and `timer_deadline` of their `ACTIVE` questions by exactly the paused duration. A team whose scheduled end was already behind it when the pause began is **ended** at its scheduled end (`TEAM_ENDED`, reason `TIMER`) instead of being revived by the shift.
+* `end` ends every `RUNNING` team through `app.expire_team(reason = COMPETITION_ENDED)`: `ended_at = least(ends_at, instant of the end)`, where the instant of the end is `paused_at` if the competition was paused (every clock was frozen). `NOT_STARTED` teams stay `NOT_STARTED`. `expire_team` does **not** cache `final_*` yet because `compute_team_score` does not exist; they stay `NULL` until the scoring patch.
+
 ---
 
 ## 3. Team
@@ -86,6 +97,8 @@ While `PAUSED`: all participant mutations return `COMPETITION_PAUSED`; admin rev
 | RUNNING | `disqualify_team` | assigned admin / super admin | two-step confirmation | `status='DISQUALIFIED'`, `ended_at=now`, `score_override=-1201`. The team is frozen and every later mutation is rejected. |
 | RUNNING | `reset_score` | assigned admin / super admin | two-step confirmation | `score_reset_at=now`, `score_reset_baseline = raw score now`, so the official score becomes 0 and later points count from 0. **`status` stays `RUNNING`: the team continues** (timers, coins, questions, submissions and reviews are untouched). A repeat Reset re-zeroes from the then-current raw score. See `DEC-04` |
 | any terminal | anything else | — | — | rejected with `ALREADY_SUBMITTED` / `TEAM_ENDED` |
+
+**Expired but not yet ended (B10 decision).** Until the sweeper and lazy expiry exist (B12), a `RUNNING` team whose `ends_at` has passed keeps `status = 'RUNNING'` in the database. `get_team_state` is a pure read: it reports `remaining_seconds = 0` and `expired = true`, never resets or extends the timer, and never writes. The transition to `ENDED` happens only through `expire_team`, called by the competition `resume` (for a team already past its end at the pause) and `end` operations. The remaining time is always derived, never stored.
 
 Terminal states are final. There is no transition out of them (brief §17: "final submission must not be reversible"). A Super Admin "revert UFM" tool (clearing a Reset baseline, un-disqualifying a team) is proposed as an emergency remedy in `DEC-04` and is **not** part of the default scope.
 
@@ -136,6 +149,8 @@ This is the *Enter competition* action. The participant UI calls it only at the 
 1. Lock team. Team must be `NOT_STARTED`; if already `RUNNING` return success with the existing times (idempotent).
 2. Set `status='RUNNING'`, `started_at = app.now()`, `ends_at = started_at + ultimate_seconds`.
 3. Audit `TEAM_STARTED`. Ping `team:{id}`.
+
+**B10:** `started_at = app.now()` and `ends_at = started_at + ultimate_seconds` (7200, locked by a check constraint) are written by one `UPDATE` under the team lock, so concurrent members observe a single pair of timestamps; `state_version` is bumped once. The competition must be `RUNNING` (`PAUSED` → `COMPETITION_PAUSED`: a team cannot be started during a pause, because every clock is frozen at `paused_at`, before the team would start). A team that is **already `RUNNING`** returns its existing state and times untouched — no reset, no audit, no version bump — whatever the competition status, since nothing is mutated. FINAL_SUBMITTED → `ALREADY_SUBMITTED`; ENDED/DISQUALIFIED → `TEAM_ENDED`.
 
 ### 5.2 `unlockTheme` (`unlock_theme`)
 1. Preamble. Verify the theme exists and has no `team_themes` row (else `THEME_ALREADY_UNLOCKED`, and **no charge**).

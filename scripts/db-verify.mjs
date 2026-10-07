@@ -8,7 +8,7 @@
 // Never point this at a production database. It refuses URLs that do not look local unless DB_VERIFY_ALLOW_REMOTE=1.
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -65,6 +65,28 @@ try {
   if (ok) {
     for (const f of sqlFiles("supabase/tests")) {
       ok = psql(target, ["-f", join(root, "supabase/tests", f)], `test ${f}`) && ok;
+    }
+  }
+  // Multi-connection tests: plain SQL cannot open parallel sessions. Each script gets the scratch database in VERIFY_DB_URL.
+  if (ok) {
+    const dir = join(root, "supabase/tests/concurrency");
+    const scripts = existsSync(dir)
+      ? readdirSync(dir)
+          .filter((f) => f.endsWith(".concurrency.mjs"))
+          .sort()
+      : [];
+    for (const f of scripts) {
+      const r = spawnSync(process.execPath, [join(dir, f)], {
+        encoding: "utf8",
+        env: { ...process.env, VERIFY_DB_URL: target },
+      });
+      if (r.status !== 0) {
+        ok = false;
+        console.error(`FAIL  concurrency ${f}\n${r.stdout}${r.stderr}`);
+      } else {
+        process.stdout.write(r.stdout);
+        console.log(`ok    concurrency ${f}`);
+      }
     }
   }
 } finally {

@@ -25,7 +25,10 @@ export interface AuthDeps {
 /** Login bodies carry three short strings; 2 KB is the documented limit for non-answer requests (API_SPEC §8). */
 const MAX_BODY_BYTES = 2048;
 
-async function readJson<S extends z.ZodType>(request: Request, schema: S): Promise<z.infer<S>> {
+export async function readJson<S extends z.ZodType>(
+  request: Request,
+  schema: S,
+): Promise<z.infer<S>> {
   const type = request.headers.get("content-type") ?? "";
   if (!/^application\/json\b/i.test(type)) {
     throw new ApiError("VALIDATION_FAILED", "Send a JSON body.");

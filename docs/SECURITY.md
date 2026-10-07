@@ -58,6 +58,15 @@ Status: **proposal for review (Milestone 0).** Scope: a time-boxed, high-integri
 * **Logging:** the API logs only the error *name* of an unexpected failure; request bodies, passwords, tokens, cookies and hashes are never logged.
 * **Service-role access:** the server talks to PostgreSQL only through `SUPABASE_SERVICE_ROLE_KEY` (`src/lib/db`, `server-only`), so `anon`/`authenticated` keys remain useless.
 
+### 3.2 Competition runtime (Patch B10)
+
+* **Principals come from the session only.** `POST /api/p/start` and `GET /api/p/state` read the team and member from the B9 session; a team id in the body, query or headers is never used (a non-empty start body is a 400). The database functions re-check that the member belongs to the team (`FORBIDDEN` otherwise) and that a staff caller is an active `SUPER_ADMIN`, so a bug in the handler cannot cross a team boundary (the "twice" rule of §4).
+* **Privileged functions:** `set_competition_status`, `start_team_competition`, `get_team_state` and their helpers (`app.lock_team`, `app.idem_*`, `app.team_state_json`, `app.expire_team`, …) follow the B9 rule: explicit `REVOKE ALL … FROM PUBLIC, anon, authenticated`, `GRANT EXECUTE … TO service_role`, pinned `search_path` on every `SECURITY DEFINER`. `supabase/tests/80_runtime.test.sql` proves it from the catalog, and additionally asserts that **no** `SECURITY DEFINER` function in `public`/`app` is executable by PUBLIC, `anon` or `authenticated`.
+* **No client-authoritative time.** Requests carry no timestamp, remaining time or balance; the timer is `ends_at` computed from `app.now()`. The response schemas are whitelists, so a hash, token or admission number added to a database result later would be stripped before reaching a client.
+* **Idempotency:** `Idempotency-Key` is mandatory on state-changing calls; keys are scoped to the acting team/staff id and bound to the operation, member and parameter (`IDEMPOTENCY_KEY_REUSED` otherwise). `request_log` stores only the response of a successful call, which holds no secret.
+* **Errors:** the engine raises stable codes; the API maps them. Anything else from the database is a generic `503`: raw PostgreSQL text never reaches a client or a log.
+* **Audit:** `COMPETITION_STATUS_CHANGED`, `TEAM_STARTED`, `TEAM_ENDED`, carrying actor, ids, times and the idempotency key as `request_id`. Rejected requests are not audited (the architecture does not require it, and a rolled-back transaction cannot write).
+
 ## 4. Authorisation matrix
 
 | Action | Participant | Admin | Super Admin |

@@ -13,7 +13,7 @@ import {
 
 /** Production wiring: the service-role database client and the validated environment, created on first use. */
 let db: ReturnType<typeof createSupabaseDb> | undefined;
-const deps: AuthDeps = {
+export const authDeps: AuthDeps = {
   db: () => {
     const env = getAuthEnv();
     db ??= createSupabaseDb({
@@ -26,7 +26,7 @@ const deps: AuthDeps = {
   now: () => Date.now(),
 };
 
-export const participantLogin = createParticipantLoginHandler(deps);
-export const staffLogin = createStaffLoginHandler(deps);
-export const logout = createLogoutHandler(deps);
-export const me = createMeHandler(deps);
+export const participantLogin = createParticipantLoginHandler(authDeps);
+export const staffLogin = createStaffLoginHandler(authDeps);
+export const logout = createLogoutHandler(authDeps);
+export const me = createMeHandler(authDeps);

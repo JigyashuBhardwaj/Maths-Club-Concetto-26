@@ -13,11 +13,16 @@ const BASE_HEADERS = { "Cache-Control": "no-store" } as const;
 export function success<T>(
   data: T,
   now: number,
-  init: { status?: number; headers?: HeadersInit } = {},
+  init: { status?: number; headers?: HeadersInit; stateVersion?: number } = {},
 ): Response {
   const headers = new Headers(init.headers);
   for (const [k, v] of Object.entries(BASE_HEADERS)) headers.set(k, v);
-  const body: SuccessEnvelope<T> = { ok: true, data, server_now: now };
+  const body: SuccessEnvelope<T> = {
+    ok: true,
+    data,
+    server_now: now,
+    ...(init.stateVersion === undefined ? {} : { state_version: init.stateVersion }),
+  };
   return Response.json(body, { status: init.status ?? 200, headers });
 }
 

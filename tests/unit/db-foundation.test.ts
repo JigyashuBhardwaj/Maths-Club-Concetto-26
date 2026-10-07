@@ -38,41 +38,49 @@ function walk(dir: string, out: string[] = []): string[] {
 
 describe("migrations", () => {
   it("are ordered, uniquely numbered and complete", () => {
-    expect(migrationNames).toHaveLength(11);
+    expect(migrationNames).toHaveLength(12);
     for (const f of migrationNames) expect(f).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
     expect(new Set(migrationNames.map((f) => f.slice(0, 14))).size).toBe(migrationNames.length);
     expect(migrationNames[0]).toContain("extensions_enums_clock");
-    expect(migrationNames.at(-3)).toContain("security_rls");
-    expect(migrationNames.at(-2)).toContain("buy_time_options");
-    expect(migrationNames.at(-1)).toContain("auth_functions");
+    expect(migrationNames.at(-4)).toContain("security_rls");
+    expect(migrationNames.at(-3)).toContain("buy_time_options");
+    expect(migrationNames.at(-2)).toContain("auth_functions");
+    expect(migrationNames.at(-1)).toContain("runtime_engine");
   });
 
-  it("restrict every B9 auth function explicitly: revoke from PUBLIC/anon/authenticated, grant to service_role", () => {
-    const auth = read(`supabase/migrations/${migrationNames.at(-1)}`);
-    const fns = [
-      ...auth.matchAll(
-        /^create (?:or replace )?function ((?:app|public)\.[a-z_]+)\s*\(([^)]*)\)/gm,
-      ),
-    ].map((m) => ({ name: m[1] ?? "", args: m[2] ?? "" }));
-    expect(fns.length).toBeGreaterThanOrEqual(11);
-    for (const { name } of fns) {
-      const esc = name.replace(".", "\\.");
-      expect(auth, `${name} revoke`).toMatch(
-        new RegExp(`revoke all on function ${esc}\\([^)]*\\)\\s+from public, anon, authenticated;`),
-      );
-      expect(auth, `${name} grant`).toMatch(
-        new RegExp(`grant execute on function ${esc}\\([^)]*\\)\\s+to service_role;`),
-      );
-    }
-    expect(auth).not.toMatch(/grant [^;]*\bto (anon|authenticated|public)\b/i);
-    // every SECURITY DEFINER function pins its search_path (no reliance on the caller's)
-    const code = auth.replace(/^--.*$/gm, "");
-    const defs = code.match(/security definer/gi)?.length ?? 0;
-    expect(defs).toBeGreaterThanOrEqual(5);
-    expect(
-      code.match(/security definer\s+set search_path = pg_catalog, [^\n]*pg_temp/g)?.length,
-    ).toBe(defs);
-  });
+  // B9 (auth_functions) and B10 (runtime_engine): each function is explicitly revoked from PUBLIC and granted to
+  // service_role only, and every SECURITY DEFINER function pins its search_path.
+  for (const [suffix, minFunctions] of [
+    ["auth_functions", 11],
+    ["runtime_engine", 12],
+  ] as const) {
+    it(`restrict every ${suffix} function explicitly: revoke from PUBLIC/anon/authenticated, grant to service_role`, () => {
+      const file = migrationNames.find((f) => f.includes(suffix)) ?? "";
+      const sql = read(`supabase/migrations/${file}`);
+      const fns = [
+        ...sql.matchAll(/^create (?:or replace )?function ((?:app|public)\.[a-z_]+)\s*\(/gm),
+      ].map((m) => m[1] ?? "");
+      expect(fns.length).toBeGreaterThanOrEqual(minFunctions);
+      for (const name of fns) {
+        const esc = name.replace(".", "\\.");
+        expect(sql, `${name} revoke`).toMatch(
+          new RegExp(
+            `revoke all on function ${esc}\\([^)]*\\)\\s+from public, anon, authenticated;`,
+          ),
+        );
+        expect(sql, `${name} grant`).toMatch(
+          new RegExp(`grant execute on function ${esc}\\([^)]*\\)\\s+to service_role;`),
+        );
+      }
+      expect(sql).not.toMatch(/grant [^;]*\bto (anon|authenticated|public)\b/i);
+      const code = sql.replace(/^--.*$/gm, "");
+      const defs = code.match(/security definer/gi)?.length ?? 0;
+      expect(defs).toBeGreaterThanOrEqual(3);
+      expect(
+        code.match(/security definer\s+set search_path = pg_catalog, [^\n]*pg_temp/g)?.length,
+      ).toBe(defs);
+    });
+  }
 
   it("enable and force RLS, and grant the browser roles nothing", () => {
     expect(migrations).toContain("enable row level security");

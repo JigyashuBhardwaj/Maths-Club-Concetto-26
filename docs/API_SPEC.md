@@ -30,6 +30,9 @@ Status: **proposal for review (Milestone 0).** Contract-first: the zod schemas i
 | RATE_LIMITED | 429 | Per-account throttle |
 | COMPETITION_NOT_RUNNING | 423 | Status `SETUP` or `ENDED` |
 | COMPETITION_PAUSED | 423 | Global pause |
+| COMPETITION_NOT_READY | 409 | `open` refused: no team yet, or the content is not exactly 10 themes × 50 questions with exactly 5 questions in every theme; `details: {teams, themes, questions, themes_not_five}` |
+| INVALID_COMPETITION_TRANSITION | 409 | The action is not legal from the current status; `details: {from, action}` |
+| IDEMPOTENCY_KEY_REUSED | 409 | The same `Idempotency-Key` was already used for a different operation, member or parameter |
 | TEAM_NOT_STARTED / TEAM_ENDED | 409 | Terminal or not-yet-started team |
 | ALREADY_SUBMITTED | 409 | "Team already submitted." |
 | THEME_ALREADY_UNLOCKED | 409 | No charge made |
@@ -48,6 +51,8 @@ Status: **proposal for review (Milestone 0).** Contract-first: the zod schemas i
 | NOT_FOUND | 404 | Unknown id or not visible to the caller |
 
 An **idempotent replay** returns the original response (same status, same body) with header `Idempotent-Replay: true`.
+
+**As implemented (B10):** only successful responses are stored (`request_log`, scoped to the team for participant calls and to the staff id for staff calls). A stored response is the response of the *first* call, so a replayed `POST /api/p/start` carries the original `remaining_seconds`; call `GET /api/p/state` for the current value. A rejected request stores nothing and may be retried with the same key. A key is bound to one operation, one actor and its parameters: reusing it for anything else is `409 IDEMPOTENCY_KEY_REUSED`. A request that is *naturally* idempotent (a second member entering an already-running team, or asking for the status the competition already has) succeeds with the existing state and does **not** mutate competition or team state, write an audit event or bump a `state_version`. Its successful response is nevertheless stored under its key for replay like any other success, so a later retry with the same key returns that stored response; the `request_log` row itself is bookkeeping and is not considered a competition-state mutation.
 
 ## 3. Authentication endpoints
 
@@ -78,8 +83,8 @@ Details of the implemented endpoints:
 
 | Method & path | Body | Engine function | Notes |
 |---------------|------|-----------------|-------|
-| `GET /api/p/state` | — | `get_team_state` | The authoritative snapshot (§7). Cheap; this is what pings and polls call |
-| `POST /api/p/start` | — | `start_team_competition` | "Enter competition". Called only after the member has acknowledged the rules and completed the fullscreen acknowledgement — never by login. Idempotent: second member gets the existing times |
+| `GET /api/p/state` | — | `get_team_state` | The authoritative snapshot (§7; **B10 implements the subset listed there**). Cheap; this is what pings and polls call. A pure read: it never changes a timer, not even for an expired team |
+| `POST /api/p/start` | — (an empty body or `{}`; anything else → 400) | `start_team_competition` | "Enter competition". Called only after the member has acknowledged the rules and completed the fullscreen acknowledgement — never by login. Idempotent: second member gets the existing times. Requires `Idempotency-Key`. B10: `data` is the §7 snapshot plus `started_now` (true only for the request that started the clock). Needs the competition to be `RUNNING`: `SETUP`/`ENDED` → `423 COMPETITION_NOT_RUNNING`, `PAUSED` → `423 COMPETITION_PAUSED`; team `FINAL_SUBMITTED` → `409 ALREADY_SUBMITTED`, `ENDED`/`DISQUALIFIED` → `409 TEAM_ENDED`. A team that is already `RUNNING` just gets its existing state, whatever the competition status |
 | `GET /api/p/questions/:questionId` | — | `get_question_for_team` | Returns body, owned hint texts, shared draft, last rejection note. `409 THEME_LOCKED` / `QUESTION_NOT_ACTIVE` for `LOCKED` questions. For an `AVAILABLE` question returns metadata only (reward, time allowed, hint costs) and **withholds the body** until it has been activated by entering it (`DEC-26`). For `APPROVED` questions returns the body plus the **team's own** approved answer and explanation, its status and the reviewer's non-sensitive note, read-only (`DEC-10`); it **never** includes `reference_answer` or `solution_notes`, in any state |
 | `POST /api/p/questions/:questionId/enter` | — | `start_question` | Called by the client when the participant **opens** the question page; there is no Start button. Activates an `AVAILABLE` question (`AVAILABLE → ACTIVE`, timer starts) and returns the authoritative `deadline` and the body. Idempotent and race-safe: if two members enter together the question is activated once and both get the same deadline; for an already-`ACTIVE`/`PENDING_APPROVAL`/`APPROVED` question it simply returns the current state. Only Q1 of an unlocked theme can be `AVAILABLE` |
 | `POST /api/p/themes/:themeId/unlock` | — | `unlock_theme` | |
@@ -117,7 +122,7 @@ An admin is authorised for a team iff `teams.admin_id = principal.staff_id`. The
 | `POST /api/super/admins` | `{username, displayName, password}` | `create_admin` | There is **no** public registration route anywhere |
 | `PATCH /api/super/admins/:id` | `{isActive}` | `set_admin_active` | Disabling revokes that admin's sessions and reassigns nothing automatically; the UI prompts to reassign (`DEC-24`) |
 | `POST /api/super/teams/:teamId/reassign` | `{adminId}` | `reassign_team` | Audited |
-| `POST /api/super/competition/status` | `{action:'open'\|'pause'\|'resume'\|'end', confirm:true}` | `set_competition_status` | |
+| `POST /api/super/competition/status` | `{action:'open'\|'pause'\|'resume'\|'end', confirm:true}` (strict) | `set_competition_status` | **Implemented in B10.** Super Admin only (an Admin gets `403`). Requires `Idempotency-Key`. `data: {changed, action, from, to, paused_seconds?, teams_shifted?, teams_ended?, teams_total?, competition:{status, opened_at, paused_at, ended_at, state_version}}`. Legal: `open` from `SETUP`, `pause` from `RUNNING`, `resume` from `PAUSED`, `end` from `RUNNING`/`PAUSED`; asking for the status the competition already has is a no-op (`changed:false`); anything else is `409 INVALID_COMPETITION_TRANSITION`. See `STATE_MACHINE.md` §2 |
 | `POST /api/super/teams/:teamId/adjust-time` | `{seconds, reason}` | `adjust_team_time` | Emergency remedy for outages (proposed, `DEC-25`); audited |
 | `GET /api/super/overview` | — | aggregate | All teams, admins, queue depth, review latency |
 | `GET /api/super/audit` | `?teamId&type&from&to&cursor` | read `audit_events` | Read-only |
@@ -148,6 +153,8 @@ An admin is authorised for a team iff `teams.admin_id = principal.staff_id`. The
   ]
 }
 ```
+
+**Implemented in B10 (`get_team_state`):** `server_now`, `state_version`, `competition.status`, `me`, `team` (`status`, `coins`, `started_at`, `ends_at`, `ended_at`, `final_submitted_at`, and the additions `duration_seconds`, `remaining_seconds`, `expired`) and `themes` as `{id, code, status, questions}` where `questions` holds only `{id, ordinal, state, deadline?}` for unlocked themes. Not yet present: `score`, `teammates`, theme names/descriptions/topics/costs, rewards, buy-time options and hints. `remaining_seconds` is `max(0, floor(ends_at − ref_time))` with `ref_time = least(now, ended_at, paused_at while PAUSED)`, computed by the database; a team that has not started reports the full `duration_seconds` (7200) and `null` timestamps. `state_version` increases whenever anything in the snapshot changes, including the competition status. The server never accepts a time, a balance or a remaining value from a client.
 
 Question `state` is one of `LOCKED | AVAILABLE | ACTIVE | PENDING_APPROVAL | APPROVED | TIMED_OUT`. An `AVAILABLE` question carries `{ "state": "AVAILABLE", "time_limit_seconds": 600, "reward_coins": 40 }` and no `deadline`. Several questions, in different themes, may be `ACTIVE` at once; each carries its own `deadline`. A hint is `purchasable` only if the question state allows it, the hint is not owned, and (for Tier 2) Tier 1 is owned. After a UFM Reset the snapshot shows `team.status = "RUNNING"` and `score.display_score` reads 0 at that instant, then moves normally as the team earns points (the server applies `score_reset_baseline`; the client never does).
 

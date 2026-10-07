@@ -1,16 +1,17 @@
 # Database foundation (Patch B)
 
 What exists: ordered PostgreSQL/Supabase migrations, a deterministic development seed, database tests, and a generated
-reviewer copy of the schema. Migration 11 (Patch B9) adds the authentication and session functions (below). What does
-**not** exist: any competition engine operation, realtime, admin UI, or new participant UI. The tables are ready for those later phases; nothing here decides game rules in
+reviewer copy of the schema. Migration 11 (Patch B9) adds the authentication and session functions and migration 12 (Patch B10) the
+competition runtime (both below). What does **not** exist: the game operations, realtime, admin UI, or new participant UI. The tables are ready for those later phases; nothing here decides game rules in
 TypeScript.
 
 ## Layout
 
 ```
-supabase/migrations/   11 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions)
+supabase/migrations/   12 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions, runtime engine)
 supabase/seed.sql      configuration + content only: 1 competition, 10 themes A–J, 50 questions, 150 buy-time options, 100 hints, placeholder keys
 supabase/tests/        plain-SQL tests (assert / rejects()); run by scripts/db-verify.mjs
+supabase/tests/concurrency/  multi-connection tests (*.concurrency.mjs, parallel psql sessions); run by scripts/db-verify.mjs
 scripts/db-verify.mjs  scratch-database runner (npm run db:verify)
 scripts/provision-superadmin.mjs  one-off interactive Super Admin creation (npm run provision:superadmin)
 scripts/db-evidence.mjs generates docs/evidence/schema.sql from the migrations (npm run db:evidence)
@@ -72,9 +73,30 @@ Failures are returned as `{"ok": false, "code": …}` rather than raised, so thr
 | `app.provision_superadmin(username, display_name, password)`                                                    | creates the single `SUPER_ADMIN`, hashing in the database; raises `SUPER_ADMIN_EXISTS` if one exists                                                                                                                                      |
 | `app.hash_password`, `app.verify_password`, `app.auth_dummy_hash`, `app.auth_throttle_retry_after/_fail/_clear` | helpers (bcrypt cost 12 via pgcrypto; per-account throttle)                                                                                                                                                                               |
 
-The clock is `app.now()` throughout, so tests move time with the existing test clock. There is deliberately **no**
-production function that changes the competition status yet: `70_auth.test.sql` sets `RUNNING`/`PAUSED`/`SETUP`/`ENDED`
-directly in test setup.
+The clock is `app.now()` throughout, so tests move time with the existing test clock. `70_auth.test.sql` puts the
+competition into `RUNNING`/`PAUSED`/`SETUP`/`ENDED` directly in test setup; the production status operation arrived with
+migration 12.
+
+## Competition runtime (migration 12, Patch B10)
+
+Same privilege model as above (explicit revoke from PUBLIC/anon/authenticated, grant to `service_role`, pinned
+`search_path`). Rejections are **raised** as `P0001` with the stable error code as the message (JSON `DETAIL` for details),
+which rolls the transaction back; only successes are stored for idempotency. `request_log` gained one column,
+`request_fingerprint`, binding a key to its operation, actor and parameter.
+
+| Function                                                                                             | Purpose                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public.set_competition_status(staff_id, action, idempotency_key)`                                   | `open`/`pause`/`resume`/`end`; active SUPER_ADMIN only; legal-transition table, idempotent no-op for the current status; `resume` shifts team `ends_at` and ACTIVE question deadlines by the paused duration; `end` ends RUNNING teams; bumps `competition.state_version` and every team's `state_version`; audits `COMPETITION_STATUS_CHANGED` |
+| `public.start_team_competition(team_id, member_id, idempotency_key)`                                 | member ∈ team → `app.lock_team` → replay check → gates → one `UPDATE` sets `RUNNING`, `started_at = app.now()`, `ends_at = started_at + 7200 s`, `state_version + 1` → audit `TEAM_STARTED`. Already `RUNNING` returns the existing state untouched                                                                                             |
+| `public.get_team_state(team_id, member_id)`                                                          | the authoritative snapshot (a read; no lock): status, competition status, `started_at`, `ends_at`, `remaining_seconds` (floor, clamped at 0, frozen at `paused_at`/`ended_at`), `expired`, `state_version`, coins, theme/question progress. No hashes, tokens or admission numbers                                                              |
+| `app.lock_team(team_id)`                                                                             | THE locking primitive: competition `FOR SHARE`, then team `FOR UPDATE` (order competition → team everywhere)                                                                                                                                                                                                                                    |
+| `app.idem_lookup` / `app.idem_store`                                                                 | request idempotency on `request_log`                                                                                                                                                                                                                                                                                                            |
+| `app.team_state_json`, `app.competition_json`, `app.epoch_ms`, `app.fail`, `app.require_super_admin` | shared builders and guards                                                                                                                                                                                                                                                                                                                      |
+| `app.expire_team(team_id, reason, ended_at, staff_id)`                                               | minimal RUNNING → ENDED (`ended_at = least(ends_at, …)`); no scoring yet                                                                                                                                                                                                                                                                        |
+
+Tests: `80_runtime.test.sql` (transitions, timer, idempotency, audit, versions, pause/resume/end, privileges) and
+`concurrency/start_team.concurrency.mjs` (four members entering at once, a retry storm with one key, a start racing a
+pause — real parallel sessions that hold the team lock for a second so the others genuinely queue).
 
 ## Deviations and decisions
 
@@ -90,9 +112,10 @@ directly in test setup.
 
 ## Known limitations (later phases)
 
-- Not implemented: every engine operation (`start_team_competition`, `unlock_theme`, `start_question`, `buy_hint`,
-  `buy_time`, `submit`, approve/disapprove, `final_submit`, reset/disqualify), `compute_team_score`, the sweeper, the leaderboard
-  refresh, `set_competition_status`, the login UI and route guards, realtime and its `realtime.messages` policy.
+- Not implemented: the game operations (`unlock_theme`, `start_question`, `buy_hint`, `buy_time`, `submit`,
+  approve/disapprove, `final_submit`, reset/disqualify), `compute_team_score` (so `final_*` stay NULL), the sweeper and lazy
+  expiry (an expired `RUNNING` team stays `RUNNING` and is reported with `remaining_seconds = 0, expired = true`), the
+  leaderboard refresh, the login UI and route guards, realtime and its `realtime.messages` policy, and the `request_log` purge job.
 - Unknown-account throttle rows (`auth_throttle`) are kept until a purge job exists (a later patch).
 - Verified on plain PostgreSQL 16 and 18 (Linux). Supabase-specific behaviour (platform-created roles, default privileges,
   Data API exposure of the `public` schema, the `realtime` schema) has not been exercised.
