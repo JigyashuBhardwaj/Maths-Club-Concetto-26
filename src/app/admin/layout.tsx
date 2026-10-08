@@ -15,6 +15,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
   const nav = [
     { label: "Create a team", node: <CreateTeamNav /> },
     { label: "My teams", href: "/admin/teams" },
+    { label: "Review queue", href: "/admin/review" },
   ];
   // The bottom line shows the Admin's user ID (the username they sign in with).
   return (

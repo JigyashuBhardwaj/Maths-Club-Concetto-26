@@ -64,13 +64,23 @@ export const teamStateSchema = z
       z.object({
         id: z.number().int().min(1).max(10),
         code: z.string().length(1),
+        name: z.string(),
+        description: z.string(),
+        topics: z.array(z.string()),
+        difficulty: z.enum(["EASY", "MEDIUM", "HARD"]),
+        unlock_cost: z.number().int().nonnegative(),
         status: z.enum(["LOCKED", "IN_PROGRESS", "COMPLETED", "FAILED"]),
         questions: z.array(
           z.object({
             id: z.number().int().min(1).max(50),
             ordinal: z.number().int().min(1).max(5),
             state: questionStateSchema,
+            // Present once the question is no longer LOCKED (B13): what it pays and how long it runs.
+            reward_coins: z.number().int().nonnegative().optional(),
+            time_limit_seconds: z.number().int().positive().optional(),
+            // ACTIVE: the absolute deadline and the seconds left; PENDING_APPROVAL: the frozen seconds left.
             deadline: epochMs.optional(),
+            remaining_seconds: z.number().int().nonnegative().optional(),
           }),
         ),
       }),

@@ -8,7 +8,7 @@ TypeScript.
 ## Layout
 
 ```
-supabase/migrations/   13 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions, runtime engine, provisioning)
+supabase/migrations/   14 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions, runtime engine, provisioning, gameplay engine)
 supabase/seed.sql      configuration + content only: 1 competition, 10 themes A–J, 50 questions, 150 buy-time options, 100 hints, placeholder keys
 supabase/tests/        plain-SQL tests (assert / rejects()); run by scripts/db-verify.mjs
 supabase/tests/concurrency/  multi-connection tests (*.concurrency.mjs, parallel psql sessions); run by scripts/db-verify.mjs
@@ -121,3 +121,21 @@ pause — real parallel sessions that hold the team lock for a second so the oth
   Data API exposure of the `public` schema, the `realtime` schema) has not been exercised.
 - The participant home and question page still show the static mock timer from the layout image (03:46:54), which is longer
   than the 2-hour timer. It is a UI mock value removed when the real timer is wired in; it was left untouched on purpose.
+
+## Gameplay engine (migration 14, Patch B13)
+
+Same privilege model (explicit revoke from PUBLIC/anon/authenticated, grant to `service_role`, pinned `search_path`, rejections raised as `P0001` with the error code as message). Everything is team-scoped and server-authoritative; the full description is in `GAMEPLAY.md`.
+
+| Function                                                                                              | Purpose                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public.unlock_theme(team_id, member_id, theme_id, idempotency_key)`                                  | team-wide unlock, charged once (`THEME_ALREADY_UNLOCKED` for the loser of a race); Q1 becomes `AVAILABLE` with no timer                                    |
+| `public.start_question(team_id, member_id, question_id, idempotency_key)`                             | `AVAILABLE → ACTIVE`, deadline = now + the question's time limit, set once; a second entry returns the same deadline                                       |
+| `public.get_question_for_team(team_id, member_id, question_id)`                                       | the team's own view of one question (a pure read): body only after entry, draft, own submission; never `reference_answer`/`solution_notes`                 |
+| `public.save_draft(...)` / `public.submit_answer(...)`                                                | compare-and-set draft shared by the team; one pending submission per team/question, idempotent, freezes the question timer                                 |
+| `public.approve_submission(staff_id, submission_id, key)` / `public.disapprove_submission(..., note)` | the minimal controlled review path: approval pays the fixed reward once and activates the next question; disapproval keeps the draft and resumes the timer |
+| `public.list_pending_submissions(staff_id)`                                                           | the thin review queue: pending submissions of the caller's teams (Super Admin: all), oldest first, max 100; read only, no reviewer keys                    |
+| `app.settle_questions`, `app.team_clock`, `app.question_clock`, `app.question_json`, `app.assert_*`   | internal helpers: lazy expiry (reads derive `TIMED_OUT`, successful mutations persist it), clocks that stop while paused, builders and guards              |
+
+Two **minimal corrections to B10** are part of this migration: `app.team_state_json` gained the theme metadata and per-question reward/time-limit/deadline/remaining fields, and `public.set_competition_status` (`resume`) now times out `ACTIVE` questions whose deadline had already passed at the pause before shifting the others.
+
+Tests: `100_gameplay.test.sql` and `concurrency/team_play.concurrency.mjs` (parallel unlocks, entries, submit vs timeout, approval races).

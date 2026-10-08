@@ -2,12 +2,10 @@
 
 import { useRef, useState, type CSSProperties } from "react";
 
-import { currentQuestionNumber, isUnlocked, unlockTheme } from "@/lib/question/engine";
-import { dispatch, useDemoState } from "@/lib/question/store";
-
+import { useGame } from "@/components/game/game-provider";
 import { cn } from "@/lib/utils";
 import { STEP_DEG } from "@/lib/home/spiral";
-import { FINAL_TICKET, TICKETS, type ThemeId, type Ticket } from "@/lib/home/themes";
+import { FINAL_TICKET, TICKETS, type Ticket } from "@/lib/home/themes";
 
 import { FinalSubmitDialog } from "./final-submit-dialog";
 import { ThemeDialog } from "./theme-dialog";
@@ -15,13 +13,16 @@ import { useSpiralMotion } from "./use-spiral-motion";
 
 /**
  * The 10 theme tickets (A–J) + the Final Submit ticket (11 in total), on a slowly turning helix.
- * Demo: "unlocked" themes live in the browser tab's demo store only (no coins are deducted, nothing is saved server-side).
+ * A theme ticket glows when the team's snapshot says the theme is unlocked (for the whole team, not per browser).
  */
 export function TicketSpiral() {
   const ringRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<Ticket>(TICKETS[0]!);
   const [open, setOpen] = useState(false);
-  const demo = useDemoState();
+  const { state } = useGame();
+  const unlockedCodes = new Set(
+    (state?.themes ?? []).filter((t) => t.status !== "LOCKED").map((t) => t.code),
+  );
 
   const { handlers, consumeDragClick } = useSpiralMotion(ringRef, open);
 
@@ -47,7 +48,7 @@ export function TicketSpiral() {
               className={cn(
                 "ticket",
                 ticket.kind === "final" && "ticket-final",
-                ticket.kind === "theme" && demo && isUnlocked(demo, ticket.id) && "is-unlocked",
+                ticket.kind === "theme" && unlockedCodes.has(ticket.id) && "is-unlocked",
               )}
               style={{ "--i": i, "--a": i * STEP_DEG } as CSSProperties}
               data-index={i}
@@ -87,15 +88,6 @@ export function TicketSpiral() {
       <ThemeDialog
         ticket={selected.kind === "theme" ? selected : null}
         open={open && selected.kind === "theme"}
-        unlocked={selected.kind === "theme" && !!demo && isUnlocked(demo, selected.id)}
-        solveHref={
-          selected.kind === "theme"
-            ? `/participant/theme/${selected.id}/${demo ? currentQuestionNumber(demo, selected.id) : 1}`
-            : "/participant"
-        }
-        onUnlock={() => {
-          if (selected.kind === "theme") dispatch((s) => unlockTheme(s, selected.id as ThemeId));
-        }}
         onClose={close}
       />
       <FinalSubmitDialog

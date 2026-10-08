@@ -27,5 +27,6 @@ export default async function Page({ params }: { params: Promise<Params> }) {
   const id = THEME_IDS.find((t) => t === theme) as ThemeId | undefined;
   const num = Number(n);
   if (!id || !/^[1-5]$/.test(n) || num < 1 || num > QUESTIONS_PER_THEME) notFound();
-  return <QuestionPage theme={id} n={num} />;
+  // `key`: every question is its own component instance, so a draft or a loading state never carries over.
+  return <QuestionPage key={`${id}-${num}`} theme={id} n={num} />;
 }

@@ -94,15 +94,29 @@ describe("team state contract", () => {
         {
           id: 1,
           code: "A",
+          name: "Theme A",
+          description: "d",
+          topics: ["t"],
+          difficulty: "EASY",
+          unlock_cost: 100,
           status: "IN_PROGRESS",
           questions: [
-            { id: 1, ordinal: 1, state: "ACTIVE", deadline: 5 },
+            {
+              id: 1,
+              ordinal: 1,
+              state: "ACTIVE",
+              deadline: 5,
+              remaining_seconds: 3,
+              reward_coins: 50,
+              time_limit_seconds: 240,
+            },
             { id: 2, ordinal: 2, state: "LOCKED" },
           ],
         },
       ],
     });
     expect(s.themes[0]?.questions[1]).not.toHaveProperty("deadline");
+    expect(s.themes[0]?.questions[1]).not.toHaveProperty("reward_coins");
   });
 });
 

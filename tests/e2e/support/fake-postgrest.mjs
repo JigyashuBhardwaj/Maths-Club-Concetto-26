@@ -18,6 +18,7 @@
 import { createServer } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { createGameplay } from "./fake-gameplay.mjs";
 
 const SESSION_MS = 12 * 60 * 60 * 1000;
 
@@ -291,8 +292,20 @@ export function createFakeBackend(identities, now = () => Date.now()) {
     },
   };
 
+  // Migration 14: competition entry, team state, unlock, questions, drafts, submissions, controlled review.
+  const gameplay = createGameplay({
+    teams,
+    staffById,
+    now,
+    AppError,
+    idemLookup,
+    idemStore,
+    audit,
+  });
+
   const functions = {
     ...provisioning,
+    ...gameplay.functions,
     participant_login(a) {
       needHash(a.p_token_hash);
       const key = `team:${String(a.p_login_id ?? "")
@@ -388,6 +401,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
 
   /** Test-only controls (never reachable from the app, which only calls /rest/v1/rpc/*). */
   const controls = {
+    ...gameplay.controls,
     /** Makes every live session of one account look expired (staff username or member admission number). */
     /** @param {{ username?: string, admissionNo?: string }} who */
     expire({ username, admissionNo }) {
@@ -407,12 +421,9 @@ export function createFakeBackend(identities, now = () => Date.now()) {
       }
       return { expired: n };
     },
-    /** The competition status the given team's login observes. */
+    /** The competition status the given team's login observes (pause / resume shift the clocks, see fake-gameplay). */
     competition({ loginId, status }) {
-      const team = teams.get(String(loginId).toLowerCase());
-      if (!team) throw new AppError("unknown team");
-      team.competition = status;
-      return { ok: true };
+      return gameplay.controls.setCompetition({ loginId, status });
     },
     /** Disables / re-enables a staff account (its live sessions then stop resolving, as in resolve_session). */
     staffActive({ username, active }) {

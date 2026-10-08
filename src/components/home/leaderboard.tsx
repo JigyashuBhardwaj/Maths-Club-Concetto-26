@@ -11,8 +11,8 @@ import {
 import { useLeaderboard } from "@/lib/home/use-leaderboard";
 
 interface LeaderboardProps {
-  /** The signed-in team's own line (rank, team_id, score). */
-  me: { rank: number; teamId: string; score: number };
+  /** The signed-in team's own line. Rank and score stay `null` until participants have a leaderboard snapshot (later patch). */
+  me: { rank: number | null; teamId: string; score: number | null };
   /** Test seam; defaults to the empty source because no teams exist yet. */
   source?: LeaderboardSource;
   intervalMs?: number;
@@ -34,13 +34,13 @@ export function Leaderboard({
 
       <div className="lb-me" role="group" aria-label="Your team">
         <span className="lb-cell lb-rank" aria-label="Your rank">
-          #{me.rank}
+          {me.rank === null ? "—" : `#${me.rank}`}
         </span>
         <span className="lb-cell lb-team" aria-label="Your team ID">
           {me.teamId}
         </span>
         <span className="lb-cell lb-score" aria-label="Your score">
-          {me.score}
+          {me.score ?? "—"}
         </span>
       </div>
 

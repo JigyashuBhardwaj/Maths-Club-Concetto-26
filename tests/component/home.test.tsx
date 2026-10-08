@@ -2,14 +2,28 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { EntryGate } from "@/components/game/entry-gate";
+import { HomeHeader } from "@/components/home/home-header";
 import { Leaderboard } from "@/components/home/leaderboard";
 import { RulesButton } from "@/components/home/rules-dialog";
 import { TicketSpiral } from "@/components/home/ticket-spiral";
-import { MOCK_TEAM } from "@/lib/home/mock";
-import { __resetDemoStoreForTests } from "@/lib/question/store";
+
+import { Game, makeClient, NOW, snapshot } from "./support/game";
+
+const client = vi.hoisted(() => ({}) as Record<string, ReturnType<typeof vi.fn>>);
+vi.mock("@/lib/gameplay/client", () => client);
+const c = makeClient();
+const ME = { rank: 12, teamId: "TEAM123", score: 60 };
 
 beforeEach(() => {
-  __resetDemoStoreForTests();
+  Object.assign(client, {
+    fetchTeamState: c.fetchTeamState,
+    enterCompetition: c.enterCompetition,
+    unlockThemeCall: c.unlockThemeCall,
+  });
+  for (const f of [c.fetchTeamState, c.enterCompetition, c.unlockThemeCall]) f.mockReset();
+  // a poll answers with whatever the test's server currently says
+  c.fetchTeamState.mockImplementation(async () => c.ok(current));
   vi.stubGlobal(
     "matchMedia",
     (q: string) =>
@@ -23,9 +37,15 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+let current = snapshot();
+const withGame = (ui: React.ReactNode, initial = snapshot()) => {
+  current = initial;
+  return render(<Game initial={initial}>{ui}</Game>);
+};
+
 describe("Leaderboard", () => {
   it("shows the viewing team line and 100 empty ranked rows", async () => {
-    render(<Leaderboard me={MOCK_TEAM} />);
+    render(<Leaderboard me={ME} />);
     expect(screen.getByRole("heading", { name: "Live Leaderboard" })).toBeInTheDocument();
     expect(screen.getByLabelText("Your rank")).toHaveTextContent("#12");
     expect(screen.getByLabelText("Your team ID")).toHaveTextContent("TEAM123");
@@ -43,7 +63,7 @@ describe("Leaderboard", () => {
         { teamId: "AAA", score: 5, minutesTaken: 1 },
         { teamId: "BBB", score: 9, minutesTaken: 1 },
       ]);
-    render(<Leaderboard me={MOCK_TEAM} source={source} intervalMs={60_000} />);
+    render(<Leaderboard me={ME} source={source} intervalMs={60_000} />);
     await act(async () => {
       await Promise.resolve();
     });
@@ -64,7 +84,7 @@ describe("Leaderboard", () => {
       .fn()
       .mockResolvedValueOnce([{ teamId: "AAA", score: 5, minutesTaken: 1 }])
       .mockRejectedValue(new Error("down"));
-    render(<Leaderboard me={MOCK_TEAM} source={source} intervalMs={1000} />);
+    render(<Leaderboard me={ME} source={source} intervalMs={1000} />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2500);
     });
@@ -86,9 +106,114 @@ describe("Rules dialog", () => {
   });
 });
 
+describe("Leaderboard own line without a participant snapshot", () => {
+  it("shows the real Team ID and a dash for rank and score", () => {
+    render(<Leaderboard me={{ rank: null, teamId: "T17", score: null }} />);
+    expect(screen.getByLabelText("Your rank")).toHaveTextContent("—");
+    expect(screen.getByLabelText("Your team ID")).toHaveTextContent("T17");
+    expect(screen.getByLabelText("Your score")).toHaveTextContent("—");
+  });
+});
+
+describe("HomeHeader", () => {
+  it("shows the server's team timer (counting down to the deadline) and the server's coin balance", async () => {
+    vi.useFakeTimers({
+      now: NOW,
+      toFake: ["Date", "setInterval", "setTimeout", "clearInterval", "clearTimeout"],
+    });
+    try {
+      withGame(<HomeHeader />, snapshot({ team: { coins: 446 } }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      // ends_at = server_now + 7 140 000 ms → 01:59:00 on the first read
+      expect(screen.getByText("01:59:00")).toBeInTheDocument();
+      expect(screen.getByText("446")).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(screen.getByText(/^01:58:5[6-8]$/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("a paused competition freezes the timer at the server's value", async () => {
+    vi.useFakeTimers({
+      now: NOW,
+      toFake: ["Date", "setInterval", "setTimeout", "clearInterval", "clearTimeout"],
+    });
+    try {
+      withGame(
+        <HomeHeader />,
+        snapshot({ competition: "PAUSED", team: { remaining_seconds: 3600 } }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText("01:00:00")).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(screen.getByText("01:00:00")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("EntryGate", () => {
+  it("is shown for a team that has not entered; the button calls the server once (idempotent key) and the gate closes", async () => {
+    const entered = snapshot({ version: 2 });
+    withGame(
+      <EntryGate />,
+      snapshot({
+        team: { status: "NOT_STARTED", started_at: null, ends_at: null, remaining_seconds: 7200 },
+      }),
+    );
+    const gate = document.querySelector("dialog.entry-gate")!;
+    await waitFor(() => expect(gate).toHaveAttribute("open"));
+    expect(screen.getByRole("heading", { name: "Enter the competition" })).toBeInTheDocument();
+    c.enterCompetition.mockResolvedValue(c.ok(entered));
+    const button = screen.getByRole("button", { name: "Enter competition" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(document.querySelector("dialog.entry-gate")).toBeNull());
+    expect(c.enterCompetition).toHaveBeenCalledTimes(1);
+    expect(c.enterCompetition.mock.calls[0]![0]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+  it("is absent once the team has started", () => {
+    withGame(<EntryGate />, snapshot());
+    expect(document.querySelector("dialog.entry-gate")).toBeNull();
+  });
+  it("cannot be used while the competition is paused", async () => {
+    withGame(
+      <EntryGate />,
+      snapshot({
+        competition: "PAUSED",
+        team: { status: "NOT_STARTED", started_at: null, ends_at: null },
+      }),
+    );
+    expect(await screen.findByText(/competition is paused/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enter competition" })).toBeDisabled();
+  });
+  it("a lost connection keeps the same key for the retry; a refusal shows fixed wording", async () => {
+    withGame(
+      <EntryGate />,
+      snapshot({ team: { status: "NOT_STARTED", started_at: null, ends_at: null } }),
+    );
+    c.enterCompetition.mockResolvedValueOnce(c.fail("NETWORK_ERROR", 0));
+    fireEvent.click(await screen.findByRole("button", { name: "Enter competition" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Can't reach the server/);
+    c.enterCompetition.mockResolvedValueOnce(c.fail("COMPETITION_PAUSED", 423));
+    fireEvent.click(screen.getByRole("button", { name: "Enter competition" }));
+    await waitFor(() => expect(c.enterCompetition).toHaveBeenCalledTimes(2));
+    expect(c.enterCompetition.mock.calls[1]![0]).toBe(c.enterCompetition.mock.calls[0]![0]);
+  });
+});
+
 describe("TicketSpiral", () => {
   it("renders exactly 10 themes (A-J) and the final ticket last; no K or L", () => {
-    render(<TicketSpiral />);
+    withGame(<TicketSpiral />);
     const labels = screen
       .getAllByRole("button", { name: /^(THEME|FINAL)/ })
       .map((b) => b.querySelector(".ticket-label")?.textContent);
@@ -101,26 +226,74 @@ describe("TicketSpiral", () => {
     expect(screen.queryByRole("button", { name: /THEME L/ })).toBeNull();
   });
 
-  it("theme dialog: unlock flips to Let's solve (visual only), explore closes", async () => {
-    render(<TicketSpiral />);
+  it("a ticket glows only for a theme the TEAM has unlocked, per the server snapshot", () => {
+    withGame(
+      <TicketSpiral />,
+      snapshot({ themes: { B: { q: ["AVAILABLE", "LOCKED", "LOCKED", "LOCKED", "LOCKED"] } } }),
+    );
+    expect(screen.getByRole("button", { name: /THEME B/ })).toHaveClass("is-unlocked");
+    expect(screen.getByRole("button", { name: /THEME A/ })).not.toHaveClass("is-unlocked");
+  });
+
+  it("theme dialog shows the server's text and price; Unlock asks the server once and then offers Let's solve", async () => {
+    withGame(<TicketSpiral />);
     fireEvent.click(screen.getByRole("button", { name: /THEME C/ }));
     const theme = screen.getByRole("dialog", { name: "THEME C" });
     expect(theme).toHaveAttribute("open");
-    expect(screen.getByRole("heading", { name: "THEME C" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Unlock with xyz coins" }));
-    expect(screen.getByRole("link", { name: "Let's solve" })).toHaveAttribute(
+    expect(screen.getByText("Server description of theme C.")).toBeInTheDocument();
+    const after = snapshot({
+      version: 2,
+      team: { coins: 300 },
+      themes: { C: { q: ["AVAILABLE", "LOCKED", "LOCKED", "LOCKED", "LOCKED"] } },
+    });
+    c.unlockThemeCall.mockResolvedValue(c.ok(after));
+    const unlock = screen.getByRole("button", { name: "Unlock with 100 coins" });
+    fireEvent.click(unlock);
+    fireEvent.click(unlock);
+    expect(await screen.findByRole("link", { name: "Let's solve" })).toHaveAttribute(
       "href",
       "/participant/theme/C/1",
     );
+    expect(c.unlockThemeCall).toHaveBeenCalledTimes(1);
+    expect(c.unlockThemeCall.mock.calls[0]![0]).toBe(3);
+    expect(c.unlockThemeCall.mock.calls[0]![1]).toMatch(/^[0-9a-f-]{36}$/);
     fireEvent.click(screen.getByRole("button", { name: "Explore other themes" }));
     await waitFor(() => expect(theme).not.toHaveAttribute("open"));
-    // the unlocked state is remembered locally for that theme
-    fireEvent.click(screen.getByRole("button", { name: /THEME C/ }));
-    expect(screen.getByRole("link", { name: "Let's solve" })).toBeInTheDocument();
+  });
+
+  it("a theme a teammate already unlocked goes straight to the current question", () => {
+    withGame(
+      <TicketSpiral />,
+      snapshot({
+        themes: { D: { q: ["APPROVED", "APPROVED", "ACTIVE", "LOCKED", "LOCKED"] } },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /THEME D/ }));
+    expect(screen.getByRole("link", { name: "Let's solve" })).toHaveAttribute(
+      "href",
+      "/participant/theme/D/3",
+    );
+    expect(screen.queryByRole("button", { name: /^Unlock/ })).toBeNull();
+  });
+
+  it("not enough coins: Unlock is disabled and says why; a server refusal shows fixed wording", async () => {
+    withGame(<TicketSpiral />, snapshot({ team: { coins: 40 } }));
+    fireEvent.click(screen.getByRole("button", { name: /THEME E/ }));
+    expect(screen.getByRole("button", { name: "Unlock with 100 coins" })).toBeDisabled();
+    expect(screen.getByText(/costs 100 coins and your team has 40/)).toBeInTheDocument();
+  });
+
+  it("INSUFFICIENT_COINS from the server (the balance moved) shows a message and no unlock", async () => {
+    withGame(<TicketSpiral />);
+    fireEvent.click(screen.getByRole("button", { name: /THEME F/ }));
+    c.unlockThemeCall.mockResolvedValue(c.fail("INSUFFICIENT_COINS", 409, { have: 20, need: 100 }));
+    fireEvent.click(screen.getByRole("button", { name: "Unlock with 100 coins" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("You don't have enough coins");
+    expect(screen.queryByRole("link", { name: "Let's solve" })).toBeNull();
   });
 
   it("final dialog: Yes, submit and Go back both just close", async () => {
-    render(<TicketSpiral />);
+    withGame(<TicketSpiral />);
     fireEvent.click(screen.getByRole("button", { name: /FINAL SUBMIT/ }));
     const finalDialog = screen.getByRole("dialog", { name: "Final Submit" });
     expect(finalDialog).toHaveAttribute("open");

@@ -1,6 +1,6 @@
 /**
  * API error codes and their HTTP statuses (docs/API_SPEC.md §1–§2). Only the codes the implemented layers can produce
- * are listed (auth in B9, the competition runtime in B10); later patches extend the table rather than inventing codes
+ * are listed (auth in B9, the competition runtime in B10, provisioning in B12, gameplay in B13); later patches extend the table rather than inventing codes
  * in handlers.
  */
 export const ERROR_STATUS = {
@@ -21,6 +21,15 @@ export const ERROR_STATUS = {
   TEAM_CODE_TAKEN: 409,
   LOGIN_ID_TAKEN: 409,
   ADMISSION_NO_TAKEN: 409,
+  THEME_ALREADY_UNLOCKED: 409,
+  THEME_LOCKED: 409,
+  INSUFFICIENT_COINS: 409,
+  QUESTION_NOT_ACTIVE: 409,
+  QUESTION_NOT_AVAILABLE: 409,
+  QUESTION_TIMED_OUT: 409,
+  SUBMISSION_PENDING: 409,
+  SUBMISSION_NOT_PENDING: 409,
+  STALE_DRAFT: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 
@@ -90,6 +99,15 @@ const DB_ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   TEAM_CODE_TAKEN: "That Team ID is already in use.",
   LOGIN_ID_TAKEN: "That Login ID is already in use.",
   ADMISSION_NO_TAKEN: "An admission number is already registered to a team.",
+  THEME_ALREADY_UNLOCKED: "This theme is already unlocked.",
+  THEME_LOCKED: "This theme is not unlocked.",
+  INSUFFICIENT_COINS: "Not enough Maths Coins.",
+  QUESTION_NOT_ACTIVE: "That is not possible in the question's current state.",
+  QUESTION_NOT_AVAILABLE: "This question cannot be started.",
+  QUESTION_TIMED_OUT: "Time is up for this question.",
+  SUBMISSION_PENDING: "A submission is already waiting for review.",
+  SUBMISSION_NOT_PENDING: "This submission has already been reviewed.",
+  STALE_DRAFT: "A teammate saved a newer draft.",
 };
 
 /** Only these codes may carry details, and only flat primitives: counts, state names and field names. */
@@ -98,6 +116,8 @@ const DETAILS_ALLOWED = new Set<ErrorCode>([
   "COMPETITION_NOT_READY",
   "INVALID_COMPETITION_TRANSITION",
   "ADMISSION_NO_TAKEN",
+  "INSUFFICIENT_COINS",
+  "STALE_DRAFT",
 ]);
 
 function safeDetails(code: ErrorCode, raw: unknown): Record<string, unknown> | undefined {

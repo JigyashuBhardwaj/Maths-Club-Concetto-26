@@ -39,6 +39,11 @@ const staff = (role: "ADMIN" | "SUPER_ADMIN") => ({
 const themes = Array.from({ length: 10 }, (_, i) => ({
   id: i + 1,
   code: "ABCDEFGHIJ"[i],
+  name: `Theme ${"ABCDEFGHIJ"[i]}`,
+  description: "A theme.",
+  topics: ["algebra"],
+  difficulty: "EASY",
+  unlock_cost: 100,
   status: "LOCKED",
   questions: [],
 }));

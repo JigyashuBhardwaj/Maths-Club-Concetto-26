@@ -16,7 +16,15 @@ export type DbFunction =
   | "create_admin"
   | "create_team"
   | "list_admin_teams"
-  | "get_leaderboard";
+  | "get_leaderboard"
+  | "unlock_theme"
+  | "start_question"
+  | "get_question_for_team"
+  | "save_draft"
+  | "submit_answer"
+  | "approve_submission"
+  | "disapprove_submission"
+  | "list_pending_submissions";
 
 export interface Db {
   /** Calls one database function and returns its JSON result. Throws `DbError` on any transport/database error. */

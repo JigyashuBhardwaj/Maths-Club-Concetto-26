@@ -25,20 +25,24 @@ export interface AuthDeps {
 /** Login bodies carry three short strings; 2 KB is the documented limit for non-answer requests (API_SPEC §8). */
 const MAX_BODY_BYTES = 2048;
 
+/** Answer and draft bodies may carry two 10 000-character texts (API_SPEC §8: 20 KB); callers pass this limit. */
+export const MAX_ANSWER_BODY_BYTES = 24 * 1024;
+
 export async function readJson<S extends z.ZodType>(
   request: Request,
   schema: S,
+  maxBytes: number = MAX_BODY_BYTES,
 ): Promise<z.infer<S>> {
   const type = request.headers.get("content-type") ?? "";
   if (!/^application\/json\b/i.test(type)) {
     throw new ApiError("VALIDATION_FAILED", "Send a JSON body.");
   }
   const declared = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+  if (Number.isFinite(declared) && declared > maxBytes) {
     throw new ApiError("VALIDATION_FAILED", "Request body is too large.");
   }
   const text = await request.text();
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) {
+  if (new TextEncoder().encode(text).length > maxBytes) {
     throw new ApiError("VALIDATION_FAILED", "Request body is too large.");
   }
   let json: unknown;

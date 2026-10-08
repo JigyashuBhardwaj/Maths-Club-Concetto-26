@@ -2,50 +2,56 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { signInSharedParticipant } from "./support/session";
+import { adminReviewer, beginTheme, createPlayerTeam, inspect, signInMember } from "./support/game";
+import type { E2ETeam } from "./support/identities";
 
-/** Unlock a theme the way a member does: open its ticket on the home page, unlock, "Let's solve". */
-async function startTheme(page: Page, letter = "A") {
-  await page.goto("/participant");
-  const ticket = page.getByRole("button", { name: `THEME ${letter}` });
-  await ticket.focus();
-  await page.keyboard.press("Enter");
-  await page.getByRole("button", { name: "Unlock with xyz coins" }).click();
-  await page.getByRole("link", { name: "Let's solve" }).click();
-  await page.waitForURL(`**/participant/theme/${letter}/1`);
+/**
+ * A team of its own, signed in as member 1 in this page, that has entered the competition, unlocked theme A and
+ * entered Q1 (all through the real API), then the Q1 page itself. Unlocking, answering and approving change team-wide
+ * server state, so no two tests share a team.
+ */
+async function startTheme(page: Page): Promise<E2ETeam> {
+  const team = await createPlayerTeam();
+  // beginTheme signs member 1 in itself; a later login supersedes that session, so the page signs in AFTER it
+  await beginTheme(team);
+  await signInMember(page.context(), team, 1);
+  await page.goto("/participant/theme/A/1");
   await expect(page.getByText("Q1.")).toBeVisible({ timeout: 60_000 }); // inside the 90 s test budget below
+  await expect(page.locator(".q-text")).toContainText("Body of question A1");
+  return team;
 }
 
 test.describe("question page", () => {
-  // The question pages are protected routes (B11): every test here starts from a real signed-in participant session.
-  test.beforeEach(async ({ page }, info) => {
-    await signInSharedParticipant(page, info);
-  });
-
-  // Every test here pays startTheme() first (/participant -> unlock -> Q1). Under software WebGL the full-size
-  // liquid background leaves the desktop viewport at ~1.5 fps, so that step alone takes 10-15 s and each test
-  // runs 16-30 s, with no headroom under the 30 s default (more under parallel workers). Same assertions, more time.
+  // Every test here pays startTheme() first. Under software WebGL the full-size liquid background leaves the desktop
+  // viewport at ~1.5 fps, so loading a question page takes 10-15 s and each test runs 16-30 s, with no headroom under
+  // the 30 s default (more under parallel workers). Same assertions, more time.
   test.describe.configure({ timeout: 90_000 });
 
   test("renders everything from the spec with no console errors", async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     page.on("pageerror", (e) => errors.push(String(e)));
-    await startTheme(page, "C");
-    await expect(page.getByRole("heading", { level: 1, name: "THEME C" })).toBeVisible();
-    await expect(page.getByRole("group", { name: "Ultimate timer" })).toBeVisible();
+    await startTheme(page);
+    await expect(page.getByRole("heading", { level: 1, name: "THEME A" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Team timer" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Question timer" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "buy time" })).toBeVisible();
-    await expect(page.getByRole("group", { name: "Coins left" })).toContainText("446");
+    await expect(page.getByRole("button", { name: "buy time" })).toBeDisabled();
+    // 500 starting coins less the 100 the team paid for the theme, both from the server
+    await expect(page.getByRole("group", { name: "Coins left" })).toContainText("400");
     await expect(page.getByRole("group", { name: /Reward/ })).toContainText("50 coins++");
-    await expect(page.getByRole("button", { name: /^Hint 1/ })).toContainText("buy with 40 coins");
+    await expect(page.getByRole("button", { name: /^Hint 1/ })).toBeDisabled();
     await expect(page.getByRole("button", { name: /^Hint 2/ })).toBeDisabled();
+    // entering Q1 started its timer on the server: there is nothing to press
+    await expect(page.getByRole("button", { name: /start/i })).toHaveCount(0);
     await expect(page.getByPlaceholder("write your answer here with explanation")).toBeVisible();
     await expect(page.getByRole("button", { name: "Clear all" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Submit" })).toBeVisible();
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
-  test("question timer runs from 04:00 as soon as Q1 is entered", async ({ page }) => {
+  test("question timer is running as soon as Q1 is entered (started by the server, not by a button)", async ({
+    page,
+  }) => {
     await startTheme(page);
     const timer = page.getByRole("group", { name: "Question timer" }).locator(".stat-value");
     await expect(timer).toHaveText(/0[34]:\d\d/);
@@ -109,17 +115,34 @@ test.describe("question page", () => {
   test("answer → submit → pending → (admin) approved → next question opens; previous is read-only", async ({
     page,
   }) => {
-    await startTheme(page);
+    const team = await startTheme(page);
     await page.getByRole("textbox").fill("x = 4 because ...");
     await page.getByRole("button", { name: "Submit" }).click();
     await expect(page.getByRole("button", { name: "Pending for approval" })).toBeDisabled();
     await expect(page.getByRole("button", { name: /Next question/ })).toBeDisabled();
-    await page.getByRole("button", { name: "Approve", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Approved" })).toBeDisabled();
-    await expect(page.getByRole("group", { name: "Coins left" })).toContainText("496");
+    // the question timer is frozen while the team waits for review; the team timer keeps running
+    const pending = (await inspect(team)).questions["1"]!;
+    expect(pending.state).toBe("PENDING_APPROVAL");
+    expect(pending.deadline).toBeNull();
+
+    // the controlled approval path: an Admin approves through the real route; the page learns it by polling
+    const admin = await adminReviewer();
+    try {
+      const submission = (await inspect(team)).submissions[0]!;
+      const approved = await admin.review.approve(submission.id);
+      expect(approved.body.data).toMatchObject({
+        reward_awarded: 50,
+        next_question_activated: true,
+      });
+    } finally {
+      await admin.api.dispose();
+    }
+    await expect(page.getByRole("button", { name: "Approved" })).toBeDisabled({ timeout: 20_000 });
+    await expect(page.getByRole("group", { name: "Coins left" })).toContainText("450");
     await page.getByRole("link", { name: "Next question" }).click();
     await page.waitForURL("**/theme/A/2");
     await expect(page.getByText("Q2.")).toBeVisible();
+    await expect(page.locator(".q-text")).toContainText("Body of question A2");
     await expect(page.getByRole("textbox")).toHaveValue("");
     await page.getByRole("link", { name: "Previous question" }).click();
     await page.waitForURL("**/theme/A/1");
@@ -130,52 +153,51 @@ test.describe("question page", () => {
   });
 
   test("disapproval puts the red Submit back and keeps the text", async ({ page }) => {
-    await startTheme(page);
+    const team = await startTheme(page);
     await page.getByRole("textbox").fill("wrong");
     await page.getByRole("button", { name: "Submit" }).click();
-    await page.getByRole("button", { name: "Disapprove" }).click();
+    await expect(page.getByRole("button", { name: "Pending for approval" })).toBeDisabled();
+    const admin = await adminReviewer();
+    try {
+      const submission = (await inspect(team)).submissions[0]!;
+      const res = await admin.review.disapprove(submission.id, "Check the sign.");
+      expect(res.body.data.submission.status).toBe("REJECTED");
+    } finally {
+      await admin.api.dispose();
+    }
+    await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled({ timeout: 20_000 });
     await expect(page.getByRole("textbox")).toHaveValue("wrong");
     await expect(page.getByRole("textbox")).toBeEditable();
-    await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled();
+    await expect(page.getByRole("status").filter({ hasText: "Not approved" })).toContainText(
+      "Check the sign.",
+    );
     await page.getByRole("textbox").fill("better");
     await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled();
   });
 
-  test("hint and buy-time dialogs", async ({ page }) => {
-    // ~45 s under software WebGL, longer than the 30 s default.
-    test.setTimeout(90_000);
+  test("hints and buy time are shown but not available yet", async ({ page }) => {
+    // They arrive in a later patch (B14/B15): the server has no such function, so the buttons are disabled.
     await startTheme(page);
-    await page.getByRole("button", { name: /^Hint 1/ }).click();
-    let dlg = page.getByRole("dialog", { name: "Hint 1" });
-    await expect(dlg).toContainText("Do you want to purchase this hint for 40 coins?");
-    await dlg.getByRole("button", { name: "Yes" }).click();
-    await expect(page.getByRole("group", { name: "Coins left" })).toContainText("406");
-    dlg = page.getByRole("dialog", { name: "Hint 1" });
-    await expect(dlg).toContainText(/Lorem ipsum/);
-    await dlg.getByRole("button", { name: "Close" }).click();
-    await expect(dlg).toBeHidden();
-
-    await page.getByRole("button", { name: "buy time" }).click();
-    dlg = page.getByRole("dialog", { name: "Buy time" });
-    await dlg.getByRole("button", { name: /2 mins/ }).click();
-    await expect(dlg).toContainText("Are you sure?");
-    await dlg.getByRole("button", { name: "Yes" }).click();
-    await expect(dlg).toBeHidden();
-    await expect(page.getByRole("group", { name: "Coins left" })).toContainText("386");
-    await expect(page.getByRole("group", { name: "Question timer" })).toContainText(/0[56]:\d\d/);
+    for (const name of [/^Hint 1/, /^Hint 2/, "buy time"]) {
+      await expect(page.getByRole("button", { name })).toBeDisabled();
+    }
+    await expect(page.getByRole("button", { name: /^Hint 1/ })).toContainText("coming soon");
   });
 
   test("direct visits to a locked theme or question show a notice", async ({ page }) => {
+    await startTheme(page);
     await page.goto("/participant/theme/D/1");
     await expect(page.getByText(/theme is locked/i)).toBeVisible();
     await page.getByRole("link", { name: "Back to home" }).click();
     await page.waitForURL("**/participant");
-    await startTheme(page, "E");
-    await page.goto("/participant/theme/E/2");
+    await page.goto("/participant/theme/A/2");
     await expect(page.getByText(/locked until the previous one is approved/i)).toBeVisible();
+    // the locked page carries no question body
+    await expect(page.getByText("Body of question A2")).toHaveCount(0);
   });
 
-  test("unknown theme or question number is a 404", async ({ page }) => {
+  test("unknown theme or question number is a 404", async ({ page }, info) => {
+    await signInSharedParticipant(page, info);
     expect((await page.goto("/participant/theme/Z/1"))?.status()).toBe(404);
     expect((await page.goto("/participant/theme/K/1"))?.status()).toBe(404);
     expect((await page.goto("/participant/theme/L/1"))?.status()).toBe(404);
@@ -184,8 +206,8 @@ test.describe("question page", () => {
     expect((await page.goto("/participant/theme/A/0"))?.status()).toBe(404);
   });
 
-  test("no axe violations: active, dialog open, pending, approved", async ({ page }) => {
-    // Four axe scans plus UI steps take ~50 s under software WebGL, longer than the 30 s default.
+  test("no axe violations: active, pending, approved", async ({ page }) => {
+    // Three axe scans plus UI steps take ~40 s under software WebGL, longer than the 30 s default.
     test.setTimeout(90_000);
     const scan = async (label: string) => {
       await page.waitForTimeout(600);
@@ -195,15 +217,19 @@ test.describe("question page", () => {
         label,
       ).toEqual([]);
     };
-    await startTheme(page);
+    const team = await startTheme(page);
     await scan("active");
-    await page.getByRole("button", { name: "buy time" }).click();
-    await scan("buy time dialog");
-    await page.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("textbox").fill("answer");
     await page.getByRole("button", { name: "Submit" }).click();
+    await expect(page.getByRole("button", { name: "Pending for approval" })).toBeDisabled();
     await scan("pending");
-    await page.getByRole("button", { name: "Approve", exact: true }).click();
+    const admin = await adminReviewer();
+    try {
+      await admin.review.approve((await inspect(team)).submissions[0]!.id);
+    } finally {
+      await admin.api.dispose();
+    }
+    await expect(page.getByRole("button", { name: "Approved" })).toBeDisabled({ timeout: 20_000 });
     await scan("approved");
   });
 });

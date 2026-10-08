@@ -251,6 +251,11 @@ test.describe("participant sign-in (browser)", () => {
 
     await control("expire", { admissionNo: creds.admissionNo });
     expect((await me(page)).status).toBe(401);
+    // B13: the open /participant page polls the server, sees the 401 and leaves for the sign-in page by itself. Wait for
+    // that first (a navigation started now would be aborted by it), then prove the server-side redirect directly.
+    await page.waitForURL(/\/login\/participant$/, { timeout: 20_000 });
+    const direct = await page.request.get("/participant", { maxRedirects: 0 });
+    expect(direct.status()).toBe(307);
     await page.goto("/participant");
     await expect(page).toHaveURL(/\/login\/participant$/);
     // the sign-in page does not treat the dead cookie as a session either: the form is shown
@@ -276,6 +281,11 @@ test.describe("participant sign-in (browser)", () => {
     await other.close();
 
     expect((await me(page)).status).toBe(401);
+    // B13: the open /participant page polls the server, sees the 401 and leaves for the sign-in page by itself. Wait for
+    // that first (a navigation started now would be aborted by it), then prove the server-side redirect directly.
+    await page.waitForURL(/\/login\/participant$/, { timeout: 20_000 });
+    const direct = await page.request.get("/participant", { maxRedirects: 0 });
+    expect(direct.status()).toBe(307);
     await page.goto("/participant");
     await expect(page).toHaveURL(/\/login\/participant$/);
   });

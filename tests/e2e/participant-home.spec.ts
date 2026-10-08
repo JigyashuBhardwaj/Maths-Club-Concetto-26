@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 
 import type { Page } from "@playwright/test";
 
-import { signInSharedParticipant } from "./support/session";
+import { beginTheme, createPlayerTeam, inspect, signInMember } from "./support/game";
+import { signInSharedParticipant, teamFor } from "./support/session";
 
 /** The ring is always drifting, so open a ticket the way a keyboard user would: focus it, press Enter. */
 async function openTicket(page: Page, name: string) {
@@ -19,7 +20,7 @@ test.describe("participant home", () => {
     await signInSharedParticipant(page, info);
   });
 
-  test("renders everything from the spec with no console errors", async ({ page }) => {
+  test("renders everything from the spec with no console errors", async ({ page }, info) => {
     const errors: string[] = [];
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -31,12 +32,14 @@ test.describe("participant home", () => {
     for (const alt of ["IIT (ISM) Dhanbad", "Event mark", "Mathematics Club IIT (ISM)"]) {
       await expect(page.getByRole("img", { name: alt })).toBeVisible();
     }
-    await expect(page.getByText("03:46:54")).toBeVisible();
-    await expect(page.getByText("446", { exact: true })).toBeVisible();
+    // B13: the numbers are the server's. The shared team entered the competition in global setup, so its team timer is
+    // running (just under 02:00:00) and it still holds the starting 500 coins; its rank and score are not published yet.
+    await expect(page.locator(".home-stats .stat-value").first()).toHaveText(/^0[12]:\d\d:\d\d$/);
+    await expect(page.getByText("500", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Live Leaderboard" })).toBeVisible();
-    await expect(page.getByLabel("Your rank")).toHaveText("#12");
-    await expect(page.getByLabel("Your team ID")).toHaveText("TEAM123");
-    await expect(page.getByLabel("Your score")).toHaveText("60");
+    await expect(page.getByLabel("Your rank")).toHaveText("—");
+    await expect(page.getByLabel("Your team ID")).toHaveText(teamFor(info).code);
+    await expect(page.getByLabel("Your score")).toHaveText("—");
     for (const name of [...ticketNames, "FINAL SUBMIT"]) {
       await expect(page.getByRole("button", { name })).toBeAttached();
     }
@@ -133,16 +136,25 @@ test.describe("participant home", () => {
     await expect(dialog).toBeHidden();
   });
 
-  test("theme dialog: heading, description, unlock label flip, explore closes", async ({
+  test("theme dialog: the server's theme, an authoritative unlock, then explore closes", async ({
     page,
   }) => {
+    // Unlocking is team-wide and charged once, so this test plays with a team of its own.
+    const team = await createPlayerTeam();
+    await beginTheme(team, { enterQ1: false }); // its own login is superseded by the page's, which comes last
+    await signInMember(page.context(), team, 1);
+    // beginTheme already unlocked theme A for the team; theme F is still locked
     await page.goto("/participant");
+    await expect(page.locator(".home-stats .stat-value").nth(1)).toHaveText("400");
     await openTicket(page, "THEME F");
     const dialog = page.getByRole("dialog", { name: "THEME F" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(/Lorem ipsum/)).toBeVisible();
-    await dialog.getByRole("button", { name: "Unlock with xyz coins" }).click();
+    await expect(dialog.getByText("E2E Theme F", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Description of E2E theme F.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Unlock with 100 coins" }).click();
     await expect(dialog.getByRole("link", { name: "Let's solve" })).toBeVisible();
+    await expect(page.locator(".home-stats .stat-value").nth(1)).toHaveText("300");
+    expect((await inspect(team)).coins).toBe(300);
     await dialog.getByRole("button", { name: "Explore other themes" }).click();
     await expect(dialog).toBeHidden();
   });

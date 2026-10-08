@@ -72,7 +72,7 @@ export function readIdempotencyKey(request: Request): string {
 }
 
 /** Endpoints without a body accept none (or an empty object): there is nothing a client may add. */
-async function requireEmptyBody(request: Request): Promise<void> {
+export async function requireEmptyBody(request: Request): Promise<void> {
   const text = (await request.text()).trim();
   if (text.length > 64 || (text !== "" && text !== "{}")) {
     throw new ApiError("VALIDATION_FAILED", "This request takes no body.");
