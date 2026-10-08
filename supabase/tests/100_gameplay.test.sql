@@ -391,31 +391,6 @@ begin
   end loop;
 end $$;
 
--- ===== 12b. the thin review queue (list_pending_submissions) =======================================================
--- Played inside a savepoint (team 1's Q11 is needed unchanged by section 13).
-savepoint queue;
-select pg_temp.at('2026-12-01 13:01:00+00');
-select pg_temp.submit(1, 1, 11, 'queue answer', 125);
-do $$
-declare q jsonb;
-begin
-  -- the Admin of the team and the Super Admin see it, another Admin does not
-  q := public.list_pending_submissions(pg_temp.staff(2));
-  assert jsonb_array_length(q->'submissions') = 1 and q->'submissions'->0->>'team_code' is not null;
-  assert q->'submissions'->0->>'answer' = 'queue answer' and (q->'submissions'->0->>'question_id')::int = 11;
-  assert q::text not like '%reference_answer%' and q::text not like '%solution_notes%' and q::text not like '%question_keys%';
-  assert jsonb_array_length(public.list_pending_submissions(pg_temp.staff(1))->'submissions') >= 1;
-  assert jsonb_array_length(public.list_pending_submissions(pg_temp.staff(3))->'submissions') = 0;
-end $$;
-select pg_temp.rejects($s$select public.list_pending_submissions(pg_temp.key(1))$s$, 'FORBIDDEN');
--- once reviewed it leaves the queue
-select pg_temp.approve(pg_temp.staff(2), pg_temp.sub(1, 11), 126);
-do $$ begin
-  assert jsonb_array_length(public.list_pending_submissions(pg_temp.staff(2))->'submissions') = 0;
-end $$;
-rollback to savepoint queue;
-select pg_temp.at('2026-12-01 13:00:00+00');
-
 -- ===== 13. pause / end gate gameplay; resume settles what ran out before the pause and shifts the rest =============
 select pg_temp.at('2026-12-01 13:04:30+00');
 select pg_temp.enter(2, 1, 6, 130);                                     -- team 2, theme 2 Q1: deadline 13:08:30
@@ -449,8 +424,7 @@ begin
     'public.save_draft(uuid,uuid,smallint,text,integer,text)',
     'public.submit_answer(uuid,uuid,smallint,text,text,uuid)',
     'public.approve_submission(uuid,uuid,uuid)',
-    'public.disapprove_submission(uuid,uuid,text,uuid)',
-    'public.list_pending_submissions(uuid)']
+    'public.disapprove_submission(uuid,uuid,text,uuid)']
   loop
     assert not has_function_privilege('anon', f, 'execute'), f || ' must not be callable by anon';
     assert not has_function_privilege('authenticated', f, 'execute'), f || ' must not be callable by authenticated';

@@ -301,6 +301,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
     idemLookup,
     idemStore,
     audit,
+    sessions,
   });
 
   const functions = {
@@ -340,6 +341,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         member,
         team,
         expiresAt: now() + SESSION_MS,
+        lastSeen: now(),
         revoked: false,
       };
       sessions.set(a.p_token_hash, s);
@@ -384,6 +386,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         s.revoked = true;
         return { ok: false, code: "UNAUTHENTICATED" };
       }
+      s.lastSeen = now(); // resolve_session stamps sessions.last_seen_at: this is what presence is derived from
       return principalJson(s);
     },
 
@@ -431,6 +434,22 @@ export function createFakeBackend(identities, now = () => Date.now()) {
       if (!u) throw new AppError("unknown staff");
       u.active = Boolean(active);
       return { ok: true };
+    },
+    /** Makes a member's live session look silent for `seconds` (a lost network / closed browser, without waiting). */
+    /** @param {{ admissionNo: string, seconds: number }} who */
+    silence({ admissionNo, seconds }) {
+      let n = 0;
+      for (const s of sessions.values()) {
+        if (
+          s.kind === "MEMBER" &&
+          !s.revoked &&
+          s.member.admissionNo === String(admissionNo).toUpperCase()
+        ) {
+          s.lastSeen -= Number(seconds) * 1000;
+          n += 1;
+        }
+      }
+      return { silenced: n };
     },
     /** Row counts, so a test can prove that a retry or a rejected request created nothing. */
     counts() {

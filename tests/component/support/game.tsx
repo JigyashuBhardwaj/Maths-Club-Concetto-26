@@ -109,6 +109,13 @@ export function makeClient() {
     enterQuestionCall: vi.fn(),
     saveDraftCall: vi.fn(),
     submitAnswerCall: vi.fn(),
+    // B14 presence heartbeat: fire-and-forget, its answer is ignored
+    sendHeartbeat: vi.fn(async () => ({
+      ok: true as const,
+      data: {},
+      serverNow: NOW,
+      stateVersion: null,
+    })),
   };
 }
 

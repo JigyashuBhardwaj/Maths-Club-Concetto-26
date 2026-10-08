@@ -1,6 +1,7 @@
 // The gameplay functions of migration 14 for the in-memory backend (fake-postgrest.mjs), used ONLY by the Playwright
 // suite: unlock_theme, start_question, get_question_for_team, save_draft, submit_answer, approve_submission,
-// disapprove_submission, start_team_competition and get_team_state.
+// disapprove_submission, start_team_competition and get_team_state, plus the B14 reads admin_matrix and admin_team_theme
+// (migration 15).
 //
 // It mirrors the SQL rule for rule (the same gates in the same order, the same error codes and details, the same result
 // shapes, the same idempotency scopes) so the browser tests exercise the real Next.js routes and the real UI against
@@ -55,7 +56,7 @@ export const QUESTIONS = THEMES.flatMap((t) =>
   })),
 );
 
-/** @param {{ teams: Map<string, any>, staffById: (id: string) => any, now: () => number, AppError: typeof Error,
+/** @param {{ sessions: Map<string, any>, teams: Map<string, any>, staffById: (id: string) => any, now: () => number, AppError: typeof Error,
  *            idemLookup: Function, idemStore: Function, audit: any[] }} deps */
 export function createGameplay({
   teams,
@@ -65,6 +66,7 @@ export function createGameplay({
   idemLookup,
   idemStore,
   audit,
+  sessions,
 }) {
   /** The engine clock: real time plus whatever the test control moved it forward (deadlines are absolute). */
   let skew = 0;
@@ -488,33 +490,104 @@ export function createGameplay({
     },
   };
 
-  /** list_pending_submissions: the thin review queue (read only; no reference answer, no key). */
-  fns.list_pending_submissions = (a) => {
-    const staff = staffById(a.p_staff_id);
-    if (!staff || !staff.active) throw fail("FORBIDDEN");
-    const rows = [];
-    for (const t of teamList()) {
-      if (staff.role !== "SUPER_ADMIN" && t.adminId !== staff.id) continue;
-      for (const s of game(t).submissions) {
-        if (s.status !== "PENDING") continue;
-        const qq = QUESTIONS.find((x) => x.id === s.qid);
-        rows.push({
-          id: s.id,
-          team_code: t.code,
-          team_name: t.name,
-          theme_code: THEMES[qq.themeId - 1].code,
-          ordinal: qq.ordinal,
-          question_id: qq.id,
-          body_md: qq.body,
-          answer: s.answer,
-          explanation: s.explanation,
-          submitted_by_slot: slotOf(t, s.memberId),
-          submitted_at: s.at,
-        });
-      }
+  // ---- Admin "My Teams" matrix (migration 15) -------------------------------------------------------------------
+  const PRESENCE_TIMEOUT_S = 75;
+  const requireOwnerAdmin = (staffId, teamId) => {
+    const staff = staffById(staffId);
+    if (!staff || !staff.active || staff.role !== "ADMIN") throw fail("FORBIDDEN");
+    const t = teamById(teamId);
+    if (!t || t.adminId !== staff.id) throw fail("NOT_FOUND");
+    return t;
+  };
+  /** member_presence: a live, unexpired session seen within the timeout (the SQL view, on the unskewed wall clock). */
+  const isOnline = (member) => {
+    const n = baseNow();
+    for (const s of sessions.values()) {
+      if (s.kind !== "MEMBER" || s.member.id !== member.id || s.revoked) continue;
+      if (s.expiresAt > n && s.lastSeen > n - PRESENCE_TIMEOUT_S * 1000) return true;
     }
-    rows.sort((x, y) => x.submitted_at - y.submitted_at || (x.id < y.id ? -1 : 1));
-    return { server_now: now(), submissions: rows.slice(0, 100) };
+    return false;
+  };
+
+  /** admin_matrix: one row per team the ADMIN owns; RED = something pending, GREEN = five approved. */
+  fns.admin_matrix = (a) => {
+    const staff = staffById(a.p_staff_id);
+    if (!staff || !staff.active || staff.role !== "ADMIN") throw fail("FORBIDDEN");
+    const rows = teamList()
+      .filter((t) => t.adminId === staff.id)
+      .sort((x, y) => x.createdAt - y.createdAt || (x.code < y.code ? -1 : 1))
+      .map((t) => {
+        const g = game(t);
+        return {
+          id: t.id,
+          team_code: t.code,
+          name: t.name,
+          status: t.status,
+          final_submitted: t.status === "FINAL_SUBMITTED",
+          members: [...t.members]
+            .sort((x, y) => x.slot - y.slot)
+            .map((m) => ({ slot: m.slot, presence: isOnline(m) ? "ONLINE" : "OFFLINE" })),
+          themes: THEMES.map((th) => {
+            const qs = QUESTIONS.filter((q) => q.themeId === th.id).map((q) =>
+              g.questions.get(q.id),
+            );
+            const approved = qs.filter((q) => q?.state === "APPROVED").length;
+            const pending = qs.filter((q) => q?.state === "PENDING_APPROVAL").length;
+            return {
+              code: th.code,
+              state: pending > 0 ? "RED" : approved === 5 ? "GREEN" : "NORMAL",
+              approved,
+              pending,
+            };
+          }),
+        };
+      });
+    return { server_now: baseNow(), presence_timeout_seconds: PRESENCE_TIMEOUT_S, teams: rows };
+  };
+
+  /** admin_team_theme: the five questions of one theme cell, with the pending submission of a RED one (no key). */
+  fns.admin_team_theme = (a) => {
+    const t = requireOwnerAdmin(a.p_staff_id, a.p_team_id);
+    const th = THEMES.find(
+      (x) =>
+        x.code ===
+        String(a.p_theme_code ?? "")
+          .trim()
+          .toUpperCase(),
+    );
+    if (!th) throw fail("NOT_FOUND");
+    const g = game(t);
+    return {
+      server_now: baseNow(),
+      team: { id: t.id, team_code: t.code, name: t.name },
+      theme: { code: th.code, name: th.name },
+      questions: QUESTIONS.filter((q) => q.themeId === th.id).map((q) => {
+        const row = g.questions.get(q.id);
+        const state = row?.state ?? "LOCKED";
+        const sub =
+          state === "PENDING_APPROVAL"
+            ? g.submissions.find((s) => s.qid === q.id && s.status === "PENDING")
+            : null;
+        return {
+          id: q.id,
+          ordinal: q.ordinal,
+          label: `${th.code}.${q.ordinal}`,
+          color: state === "APPROVED" ? "GREEN" : state === "PENDING_APPROVAL" ? "RED" : "WHITE",
+          state,
+          submission: sub
+            ? {
+                id: sub.id,
+                body_md: q.body,
+                answer: sub.answer,
+                explanation: sub.explanation,
+                submitted_by_slot: slotOf(t, sub.memberId),
+                submitted_at: sub.at,
+                reward_coins: q.reward,
+              }
+            : null,
+        };
+      }),
+    };
   };
 
   /** approve_submission / disapprove_submission: the minimum controlled review path. */

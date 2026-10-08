@@ -8,7 +8,6 @@ import {
   createDisapproveSubmissionHandler,
   createEnterQuestionHandler,
   createGetQuestionHandler,
-  createReviewQueueHandler,
   createSaveDraftHandler,
   createSubmitAnswerHandler,
   createUnlockThemeHandler,
@@ -608,45 +607,6 @@ describe("POST /api/admin/submissions/:id/approve | disapprove", () => {
         .status,
     ).toBe(400);
     expect(ops()).toHaveLength(2);
-  });
-});
-
-describe("GET /api/admin/queue", () => {
-  const row = {
-    id: SUB_ID,
-    team_code: "T17",
-    team_name: "Team Seventeen",
-    theme_code: "A",
-    ordinal: 1,
-    question_id: 1,
-    body_md: "Find x.",
-    answer: "x = 4",
-    explanation: "",
-    submitted_by_slot: 2,
-    submitted_at: NOW,
-  };
-  it("lists the pending submissions with the session's staff id; reference data never passes the whitelist", async () => {
-    const { db, ops } = fakeDb(staff("ADMIN"), () => ({
-      server_now: DB_NOW,
-      submissions: [{ ...row, reference_answer: "SECRET", solution_notes: "SECRET" }],
-    }));
-    const res = await createReviewQueueHandler(deps(db))(req("GET", "/api/admin/queue"));
-    expect(res.status).toBe(200);
-    const body = await json(res);
-    expect(body.data.submissions).toEqual([row]);
-    expect(JSON.stringify(body)).not.toContain("SECRET");
-    expect(ops()).toEqual([{ fn: "list_pending_submissions", args: { p_staff_id: STAFF_ID } }]);
-  });
-  it("is for staff only", async () => {
-    const { db, ops } = fakeDb(participant, () => ({ server_now: DB_NOW, submissions: [] }));
-    const res = await createReviewQueueHandler(deps(db))(req("GET", "/api/admin/queue"));
-    expect(res.status).toBe(403);
-    expect(ops()).toEqual([]);
-  });
-  it("rejects a malformed database answer instead of passing it on", async () => {
-    const { db } = fakeDb(staff("ADMIN"), () => ({ submissions: [{ id: "x" }] }));
-    const res = await createReviewQueueHandler(deps(db))(req("GET", "/api/admin/queue"));
-    expect(res.status).toBe(503);
   });
 });
 

@@ -105,8 +105,9 @@ test.describe("the central slice: Super Admin → Admin → Team → participant
     await page.waitForURL(reached("/admin/teams"));
     const row = page.getByRole("row", { name: new RegExp(t1.teamCode) });
     await expect(row).toContainText(t1.name);
-    await expect(row).toContainText(t1.loginId);
-    await expect(row).toContainText("4");
+    // B14: the page is the live matrix. A brand-new team is a row with all four members OUT and ten untouched theme cells.
+    await expect(row.getByText("OUT", { exact: true })).toHaveCount(4);
+    await expect(row.locator('[data-state="NORMAL"]')).toHaveCount(10);
     await expect(page.getByRole("row")).toHaveCount(2); // header + T1
     await page.getByRole("link", { name: "Go back" }).click();
     await page.waitForURL(reached("/admin"));
@@ -402,6 +403,9 @@ test.describe("accessibility of the staff pages and dialogs", () => {
     await page.goto("/admin/teams");
     await scan("/admin/teams");
 
+    // Leave the live matrix first: it polls, and a poll answered 401 after the cookies are cleared correctly sends the
+    // page to the login screen, which would race the next navigation.
+    await page.goto("about:blank");
     await page.context().clearCookies();
     await signInStaff(page, "e2e_super");
     await page.goto("/superadmin");

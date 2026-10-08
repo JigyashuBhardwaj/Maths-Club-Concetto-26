@@ -24,7 +24,8 @@ export type DbFunction =
   | "submit_answer"
   | "approve_submission"
   | "disapprove_submission"
-  | "list_pending_submissions";
+  | "admin_matrix"
+  | "admin_team_theme";
 
 export interface Db {
   /** Calls one database function and returns its JSON result. Throws `DbError` on any transport/database error. */

@@ -12,12 +12,17 @@ import {
 } from "react";
 
 import type { TeamState } from "@/lib/contracts/runtime";
-import { fetchTeamState } from "@/lib/gameplay/client";
+import { fetchTeamState, sendHeartbeat } from "@/lib/gameplay/client";
 import { clockOffset, isNewer, serverTime } from "@/lib/gameplay/derive";
 
 /** Until realtime ships (REALTIME_SPEC), polling is the whole sync path: 5 s ± 1 s while the tab is visible. */
 export const POLL_MS = 5000;
 const JITTER_MS = 1000;
+/**
+ * Presence heartbeat (B14). The Admin matrix shows a member OUT after 75 s without a sign of life (the database's
+ * `presence_timeout_seconds`), so beat well inside that, hidden tab or not: 25 s leaves room for two lost beats.
+ */
+export const HEARTBEAT_MS = 25_000;
 /** After a deadline passes, refetch shortly after so the server's own view (timeouts, themes) replaces the estimate. */
 const DEADLINE_SLACK_MS = 400;
 /** A full page load, so no stale page or router cache survives the end of the session. */
@@ -140,6 +145,22 @@ export function GameProvider({
       window.removeEventListener("online", wake);
     };
   }, [refresh]);
+
+  // presence: a heartbeat every 25 s (also from a hidden tab) and one when the browser comes back
+  useEffect(() => {
+    void sendHeartbeat();
+    const timer = setInterval(() => void sendHeartbeat(), HEARTBEAT_MS);
+    const back = () => {
+      if (!document.hidden) void sendHeartbeat();
+    };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("online", back);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("online", back);
+    };
+  }, []);
 
   // one-shot refetch right after the soonest known deadline (team end or an ACTIVE question)
   useEffect(() => {

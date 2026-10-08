@@ -14,7 +14,6 @@ import {
   enterResultSchema,
   questionIdParamSchema,
   questionResultSchema,
-  queueResultSchema,
   saveDraftSchema,
   submissionIdParamSchema,
   submitAnswerSchema,
@@ -277,27 +276,6 @@ export function createDisapproveSubmissionHandler(deps: GameplayDeps) {
           }),
         );
         return success(data, deps.now(), { headers: replayHeaders(replayed) });
-      },
-      buildClearedSessionCookie,
-    );
-}
-
-/** GET /api/admin/queue — the pending submissions of the caller's teams (thin B13 testing surface; read only). */
-export function createReviewQueueHandler(deps: GameplayDeps) {
-  return (request: Request): Promise<Response> =>
-    respond(
-      deps.now,
-      async () => {
-        const env = deps.env();
-        const db = deps.db();
-        const principal = requireReviewer(
-          await resolvePrincipal(db, request, env.SESSION_TOKEN_PEPPER),
-        );
-        const data = parseResult(
-          queueResultSchema,
-          await callDb(db, "list_pending_submissions", { p_staff_id: principal.staff.id }),
-        );
-        return success(data, deps.now());
       },
       buildClearedSessionCookie,
     );

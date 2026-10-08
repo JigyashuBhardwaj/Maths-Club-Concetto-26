@@ -31,6 +31,7 @@ function mount(initial = current, n = 1) {
 beforeEach(() => {
   Object.assign(client, {
     fetchTeamState: c.fetchTeamState,
+    sendHeartbeat: c.sendHeartbeat,
     fetchQuestion: c.fetchQuestion,
     enterQuestionCall: c.enterQuestionCall,
     saveDraftCall: c.saveDraftCall,

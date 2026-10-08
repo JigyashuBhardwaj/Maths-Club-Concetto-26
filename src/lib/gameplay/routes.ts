@@ -7,7 +7,6 @@ import {
   createDisapproveSubmissionHandler,
   createEnterQuestionHandler,
   createGetQuestionHandler,
-  createReviewQueueHandler,
   createSaveDraftHandler,
   createSubmitAnswerHandler,
   createUnlockThemeHandler,
@@ -21,4 +20,3 @@ export const saveDraft = createSaveDraftHandler(authDeps);
 export const submitAnswer = createSubmitAnswerHandler(authDeps);
 export const approveSubmission = createApproveSubmissionHandler(authDeps);
 export const disapproveSubmission = createDisapproveSubmissionHandler(authDeps);
-export const reviewQueue = createReviewQueueHandler(authDeps);

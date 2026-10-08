@@ -1,0 +1,199 @@
+/* Admin "My Teams" live matrix (B14). Same palette as the rest of the portal; state is never colour alone (text + symbol). */
+.mx-scroll {
+  position: relative;
+  overflow: auto;
+  max-height: calc(100svh - 14rem);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 106, 26, 0.5) transparent;
+}
+.mx-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: 56rem;
+  font-size: 13px;
+}
+.mx-table th,
+.mx-table td {
+  padding: 0;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
+.mx-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 6px;
+  background: rgb(14 12 16 / 0.96);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.mx-table .mx-team {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 5.5rem;
+  padding: 0 12px;
+  text-align: left;
+  background: rgb(14 12 16 / 0.96);
+  font-weight: 600;
+  color: var(--ink);
+}
+.mx-table thead .mx-team {
+  z-index: 3;
+}
+.mx-name {
+  display: block;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-dim);
+}
+.mx-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.mx-presence::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.mx-in {
+  color: #5fe08a;
+}
+.mx-out {
+  color: #ff6b6b;
+}
+.mx-out::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+.mx-cell {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-width: 3rem;
+  height: 100%;
+  min-height: 3.25rem;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition:
+    background 0.2s var(--ease),
+    box-shadow 0.2s var(--ease);
+}
+.mx-cell:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.mx-cell:focus-visible {
+  outline: 2px solid rgba(255, 150, 80, 0.9);
+  outline-offset: -3px;
+}
+.mx-cell.mx-red {
+  color: #fff;
+  background: rgba(220, 38, 38, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(255, 120, 120, 0.8);
+  animation: mx-pulse 2s ease-in-out infinite;
+}
+.mx-cell.mx-red:hover {
+  background: rgba(239, 68, 68, 0.9);
+}
+.mx-cell.mx-green {
+  color: #eaffef;
+  background: rgba(22, 163, 74, 0.6);
+}
+.mx-static {
+  display: grid;
+  place-items: center;
+  min-height: 3.25rem;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+.mx-static.mx-green {
+  color: #eaffef;
+  background: rgba(22, 163, 74, 0.6);
+}
+@keyframes mx-pulse {
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 120, 120, 0.8),
+      0 0 16px -2px rgba(239, 68, 68, 0.8);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mx-cell.mx-red {
+    animation: none;
+  }
+}
+.mx-qgrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.mx-q {
+  appearance: none;
+  display: grid;
+  gap: 2px;
+  place-items: center;
+  min-height: 4.25rem;
+  padding: 8px 4px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: default;
+}
+.mx-q small {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: inherit;
+  opacity: 0.8;
+}
+.mx-q.mx-red {
+  cursor: pointer;
+  background: rgba(220, 38, 38, 0.72);
+  border-color: rgba(255, 120, 120, 0.9);
+  color: #fff;
+}
+.mx-q.mx-green {
+  background: rgba(22, 163, 74, 0.6);
+  border-color: rgba(74, 222, 128, 0.7);
+  color: #eaffef;
+}
+.mx-q.mx-red:focus-visible {
+  outline: 2px solid rgba(255, 150, 80, 0.9);
+  outline-offset: 2px;
+}
+@media (max-width: 520px) {
+  .mx-qgrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

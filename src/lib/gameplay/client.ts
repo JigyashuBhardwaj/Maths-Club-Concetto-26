@@ -30,7 +30,7 @@ export type CallResult<T> = CallOk<T> | CallFailure;
 const record = (v: unknown): Record<string, unknown> | null =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 
-async function call(
+export async function call(
   method: "GET" | "POST" | "PUT",
   url: string,
   opts: { body?: unknown; key?: string; fetchImpl?: typeof fetch } = {},
@@ -75,7 +75,10 @@ async function call(
 }
 
 /** Validates a successful payload against its whitelist; anything else is a BAD_RESPONSE, never trusted. */
-function checked<T>(r: CallResult<unknown>, parse: (data: unknown) => T | null): CallResult<T> {
+export function checked<T>(
+  r: CallResult<unknown>,
+  parse: (data: unknown) => T | null,
+): CallResult<T> {
   if (!r.ok) return r;
   const data = parse(r.data);
   if (data === null) return { ok: false, status: 200, code: "BAD_RESPONSE" };
@@ -172,4 +175,13 @@ export async function submitAnswerCall(
     const p = questionResultSchema.shape.question.safeParse(q);
     return p.success ? p.data : null;
   });
+}
+
+/**
+ * `POST /api/p/heartbeat` — "this browser is still here" (Patch B14). It only refreshes the session's last-seen time,
+ * which the Admin matrix shows as IN / OUT. It carries no data, never throws and its answer is ignored; a lost beat is
+ * simply followed by the next one (the Admin sees OUT only after a whole timeout without any).
+ */
+export async function sendHeartbeat(fetchImpl?: typeof fetch): Promise<CallResult<unknown>> {
+  return call("POST", "/api/p/heartbeat", { fetchImpl });
 }

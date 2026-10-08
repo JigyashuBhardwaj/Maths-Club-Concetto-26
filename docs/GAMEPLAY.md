@@ -17,9 +17,9 @@ Participant gameplay is **server-authoritative**: the database decides every sta
 
 Question states: `LOCKED`, `AVAILABLE`, `ACTIVE`, `PENDING_APPROVAL`, `APPROVED`, `TIMED_OUT`. Q2–Q5 stay `LOCKED` until the previous question is approved. Different themes may have `ACTIVE` questions at the same time; timers belong to the team and the question, not to a member.
 
-## Temporary review page
+## Review path
 
-`/admin/review` (Admin area) lists the pending submissions of the Admin's own teams, opens one, and offers Approve and Disapprove. It is a thin testing surface, not the Admin dashboard: it reads `GET /api/admin/queue` and calls the same authenticated approve/disapprove endpoints, so every click runs the real database functions and holds no game state.
+Approve and Disapprove are the endpoints above. Since Patch B14 the Admin reaches them from **My Teams** (team → theme → question → submission, see `ADMIN_MATRIX.md`); the temporary B13 `/admin/review` page and `GET /api/admin/queue` were removed.
 
 ## Where things live
 
@@ -27,7 +27,7 @@ Question states: `LOCKED`, `AVAILABLE`, `ACTIVE`, `PENDING_APPROVAL`, `APPROVED`
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Database            | `supabase/migrations/20261006000014_gameplay_engine.sql` (see `DATABASE_FOUNDATION.md`)                                                                                                                                        |
 | Contracts           | `src/lib/contracts/gameplay.ts` (request and whitelist result schemas), `runtime.ts` (snapshot)                                                                                                                                |
-| Routes and handlers | `src/lib/gameplay/handlers.ts`, `routes.ts`, `src/app/api/p/**`, `src/app/api/admin/submissions/**`, `src/app/api/admin/queue`, `src/app/admin/review`, `src/components/admin/review-queue.tsx`                                |
+| Routes and handlers | `src/lib/gameplay/handlers.ts`, `routes.ts`, `src/app/api/p/**`, `src/app/api/admin/submissions/**`                                                                                                                            |
 | Browser             | `src/lib/gameplay/client.ts` (calls), `derive.ts` (clock offset, remaining time, effective state), `messages.ts`; `src/components/game/*` (provider, entry gate, banner); `src/components/question/*`; `src/components/home/*` |
 | Test backend (E2E)  | `tests/e2e/support/fake-gameplay.mjs`, an in-memory mirror of the SQL rules for the browser tests                                                                                                                              |
 
@@ -73,4 +73,4 @@ All mutations take the B10 team lock (competition `FOR SHARE`, then the team row
 
 ## Not in this patch
 
-The full Admin review product (dashboards, My Teams matrix, question keys), hints, Buy Time, the full coin economy, Final Submit, final scoring, UFM, the participant leaderboard, presence, fullscreen enforcement, realtime push and load testing.
+The rest of the Admin product (UFM, question keys; the My Teams matrix is Patch B14), hints, Buy Time, the full coin economy, Final Submit, final scoring, UFM, the participant leaderboard, presence, fullscreen enforcement, realtime push and load testing.

@@ -8,7 +8,7 @@ TypeScript.
 ## Layout
 
 ```
-supabase/migrations/   14 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions, runtime engine, provisioning, gameplay engine)
+supabase/migrations/   15 ordered migrations (extensions+enums+clock … security/RLS, buy-time options, auth functions, runtime engine, provisioning, gameplay engine, admin matrix)
 supabase/seed.sql      configuration + content only: 1 competition, 10 themes A–J, 50 questions, 150 buy-time options, 100 hints, placeholder keys
 supabase/tests/        plain-SQL tests (assert / rejects()); run by scripts/db-verify.mjs
 supabase/tests/concurrency/  multi-connection tests (*.concurrency.mjs, parallel psql sessions); run by scripts/db-verify.mjs
@@ -133,9 +133,23 @@ Same privilege model (explicit revoke from PUBLIC/anon/authenticated, grant to `
 | `public.get_question_for_team(team_id, member_id, question_id)`                                       | the team's own view of one question (a pure read): body only after entry, draft, own submission; never `reference_answer`/`solution_notes`                 |
 | `public.save_draft(...)` / `public.submit_answer(...)`                                                | compare-and-set draft shared by the team; one pending submission per team/question, idempotent, freezes the question timer                                 |
 | `public.approve_submission(staff_id, submission_id, key)` / `public.disapprove_submission(..., note)` | the minimal controlled review path: approval pays the fixed reward once and activates the next question; disapproval keeps the draft and resumes the timer |
-| `public.list_pending_submissions(staff_id)`                                                           | the thin review queue: pending submissions of the caller's teams (Super Admin: all), oldest first, max 100; read only, no reviewer keys                    |
 | `app.settle_questions`, `app.team_clock`, `app.question_clock`, `app.question_json`, `app.assert_*`   | internal helpers: lazy expiry (reads derive `TIMED_OUT`, successful mutations persist it), clocks that stop while paused, builders and guards              |
 
 Two **minimal corrections to B10** are part of this migration: `app.team_state_json` gained the theme metadata and per-question reward/time-limit/deadline/remaining fields, and `public.set_competition_status` (`resume`) now times out `ACTIVE` questions whose deadline had already passed at the pause before shifting the others.
 
 Tests: `100_gameplay.test.sql` and `concurrency/team_play.concurrency.mjs` (parallel unlocks, entries, submit vs timeout, approval races).
+
+## Admin matrix and presence (migration 15, Patch B14)
+
+Read side only. The same privilege model (explicit revoke / grant to `service_role`, pinned `search_path`, `P0001` rejections). No table, column, coin rule, timer or approval rule changes; full description in `ADMIN_MATRIX.md`.
+
+| Function                                                        | Purpose                                                                                                                                                  |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public.admin_matrix(staff_id)`                                 | one row per team the **Admin owns** (`teams.admin_id`): M1..M4 presence, the ten A..J cells (`NORMAL`/`RED`/`GREEN` + counts), Final Submit; a pure read |
+| `public.admin_team_theme(staff_id, team_id, theme_code)`        | the five questions of one cell (`WHITE`/`RED`/`GREEN`), with the pending submission of a red one; a team the caller does not own is `NOT_FOUND`          |
+| `app.require_owner_admin(staff_id, team_id)`                    | active `ADMIN` that owns the team, otherwise `FORBIDDEN` / `NOT_FOUND` (never reveals whether the team exists)                                           |
+| `app.presence_timeout_seconds()` and the `member_presence` view | the one definition of the 75 s presence timeout; the view now also requires an unexpired session                                                         |
+
+`public.list_pending_submissions` (the temporary B13 review queue) is **dropped**: the matrix drill-down replaces it. The reward stays question-level data (`questions.reward_coins`, seeded to 50); `approve_submission` was not changed.
+
+Tests: `110_admin_matrix.test.sql` (presence boundaries, ownership, cell colours, approval/reward/ledger/replay, configurable reward, disapproval, theme completion) and the existing `concurrency/team_play.concurrency.mjs` (approval race, retry storm).

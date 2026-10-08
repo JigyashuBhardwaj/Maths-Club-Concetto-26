@@ -18,6 +18,7 @@ const ME = { rank: 12, teamId: "TEAM123", score: 60 };
 beforeEach(() => {
   Object.assign(client, {
     fetchTeamState: c.fetchTeamState,
+    sendHeartbeat: c.sendHeartbeat,
     enterCompetition: c.enterCompetition,
     unlockThemeCall: c.unlockThemeCall,
   });

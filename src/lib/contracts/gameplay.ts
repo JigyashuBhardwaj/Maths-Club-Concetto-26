@@ -139,25 +139,3 @@ export const disapproveResultSchema = z.object({
   replayed: z.boolean(),
   submission: z.object({ id: z.uuid(), status: submissionStatusSchema }),
 });
-
-/** One entry of the thin review queue (`GET /api/admin/queue`, B13 testing surface). No reference answer or key. */
-export const pendingSubmissionSchema = z.object({
-  id: z.uuid(),
-  team_code: z.string(),
-  team_name: z.string(),
-  theme_code: z.string().length(1),
-  ordinal: z.number().int().min(1).max(5),
-  question_id: z.number().int().min(1).max(50),
-  body_md: z.string(),
-  answer: z.string(),
-  explanation: z.string(),
-  submitted_by_slot: z.number().int().min(1).max(4).nullable(),
-  submitted_at: epochMs,
-});
-export type PendingSubmission = z.infer<typeof pendingSubmissionSchema>;
-
-/** `list_pending_submissions` result. */
-export const queueResultSchema = z.object({
-  server_now: epochMs,
-  submissions: z.array(pendingSubmissionSchema),
-});
