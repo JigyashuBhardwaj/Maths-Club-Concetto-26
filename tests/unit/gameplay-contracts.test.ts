@@ -22,6 +22,8 @@ const q = {
   state: "ACTIVE",
   reward_coins: 50,
   time_limit_seconds: 240,
+  hints: [],
+  buy_time: { purchase_count: 0, extra_seconds: 0, can_buy: false, options: [] },
   body_md: "Find x.",
   deadline: 1_760_000_240_000,
   remaining_seconds: 200,
@@ -104,6 +106,8 @@ describe("result whitelists", () => {
       state: "AVAILABLE",
       reward_coins: 50,
       time_limit_seconds: 240,
+      hints: [],
+      buy_time: { purchase_count: 0, extra_seconds: 0, can_buy: false, options: [] },
     });
     expect(parsed).not.toHaveProperty("body_md");
     expect(parsed).not.toHaveProperty("deadline");

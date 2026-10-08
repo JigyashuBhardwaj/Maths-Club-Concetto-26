@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Applies supabase/migrations/*.sql (in filename order) and supabase/seed.sql to a SCRATCH database, then runs
-// every supabase/tests/*.sql file against it. Requires `psql` and a PostgreSQL server you may create databases on.
+// every supabase/tests/*.sql file against it, then the multi-connection (concurrency) and upgrade scripts. Requires `psql` and a PostgreSQL server you may create databases on.
 //
 //   DB_VERIFY_URL=postgres://user@127.0.0.1:5432/postgres npm run db:verify
 //
@@ -86,6 +86,29 @@ try {
       } else {
         process.stdout.write(r.stdout);
         console.log(`ok    concurrency ${f}`);
+      }
+    }
+  }
+  // Upgrade tests: each builds its own scratch database at an older schema state (so it needs the server URL, not the
+  // scratch database above) and drops it again.
+  if (ok) {
+    const dir = join(root, "supabase/tests/upgrade");
+    const scripts = existsSync(dir)
+      ? readdirSync(dir)
+          .filter((f) => f.endsWith(".upgrade.mjs"))
+          .sort()
+      : [];
+    for (const f of scripts) {
+      const r = spawnSync(process.execPath, [join(dir, f)], {
+        encoding: "utf8",
+        env: { ...process.env, VERIFY_ADMIN_URL: adminUrl },
+      });
+      if (r.status !== 0) {
+        ok = false;
+        console.error(`FAIL  upgrade ${f}\n${r.stdout}${r.stderr}`);
+      } else {
+        process.stdout.write(r.stdout);
+        console.log(`ok    upgrade ${f}`);
       }
     }
   }

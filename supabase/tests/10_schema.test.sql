@@ -42,7 +42,7 @@ do $$
 declare c text;
 begin
   foreach c in array array[
-    'competition_ultimate_locked_7200','competition_ufm_floor_locked','teams_started_iff_not_not_started',
+    'competition_ultimate_locked_14400','teams_timer_seconds_iff_started','teams_final_minutes_taken_nonneg','competition_ufm_floor_locked','teams_started_iff_not_not_started',
     'teams_reset_columns_paired','teams_disqualified_score','teams_final_submit_columns','teams_terminal_has_ended_at',
     'themes_code_matches_id','questions_id_matches_position','team_questions_active_has_deadline',
     'team_questions_pending_has_remaining','team_questions_unstarted_no_activation','team_questions_theme_unlocked_fk',

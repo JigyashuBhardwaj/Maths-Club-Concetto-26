@@ -2,7 +2,7 @@
 
 > **Competition shape (locked):** 10 themes A–J × 5 questions = 50 questions, plus a Final Submit ticket = 11 tickets. Themes K and L do not exist. The constants live in `src/lib/contracts/competition.ts`; the ticket list, spiral geometry and ticket count derive from them.
 
-Route: `/participant` (protected, B11). **Since Patch B13** the timer, coins, themes and unlock state come from the server snapshot (`GET /api/p/state`, polled; see `GAMEPLAY.md`); only the rules text, the Final Submit dialog and the empty leaderboard are still placeholders.
+Route: `/participant` (protected, B11). **Since Patch B13** the timer, coins, themes and unlock state come from the server snapshot (`GET /api/p/state`, polled; see `GAMEPLAY.md`); only the rules text and the empty leaderboard are still placeholders (**B15:** the Final Submit dialog is real: it ends the team's run, see `ECONOMY_AND_FINALIZATION.md`).
 
 ## Spec → implementation
 

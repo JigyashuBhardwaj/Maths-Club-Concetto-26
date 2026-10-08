@@ -8,11 +8,14 @@ import { Leaderboard } from "@/components/home/leaderboard";
 import { RulesButton } from "@/components/home/rules-dialog";
 import { TicketSpiral } from "@/components/home/ticket-spiral";
 
-import { Game, makeClient, NOW, snapshot } from "./support/game";
+import { Game, makeClient, makeEconomy, NOW, snapshot } from "./support/game";
 
 const client = vi.hoisted(() => ({}) as Record<string, ReturnType<typeof vi.fn>>);
 vi.mock("@/lib/gameplay/client", () => client);
+const economy = vi.hoisted(() => ({}) as Record<string, ReturnType<typeof vi.fn>>);
+vi.mock("@/lib/economy/client", () => economy);
 const c = makeClient();
+const eco = makeEconomy();
 const ME = { rank: 12, teamId: "TEAM123", score: 60 };
 
 beforeEach(() => {
@@ -22,7 +25,9 @@ beforeEach(() => {
     enterCompetition: c.enterCompetition,
     unlockThemeCall: c.unlockThemeCall,
   });
-  for (const f of [c.fetchTeamState, c.enterCompetition, c.unlockThemeCall]) f.mockReset();
+  Object.assign(economy, eco);
+  for (const f of [c.fetchTeamState, c.enterCompetition, c.unlockThemeCall, eco.finalSubmitCall])
+    f.mockReset();
   // a poll answers with whatever the test's server currently says
   c.fetchTeamState.mockImplementation(async () => c.ok(current));
   vi.stubGlobal(
@@ -127,13 +132,13 @@ describe("HomeHeader", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      // ends_at = server_now + 7 140 000 ms → 01:59:00 on the first read
-      expect(screen.getByText("01:59:00")).toBeInTheDocument();
+      // ends_at = server_now + 14 340 000 ms → 03:59:00 on the first read
+      expect(screen.getByText("03:59:00")).toBeInTheDocument();
       expect(screen.getByText("446")).toBeInTheDocument();
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3000);
       });
-      expect(screen.getByText(/^01:58:5[6-8]$/)).toBeInTheDocument();
+      expect(screen.getByText(/^03:58:5[6-8]$/)).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -168,12 +173,14 @@ describe("EntryGate", () => {
     withGame(
       <EntryGate />,
       snapshot({
-        team: { status: "NOT_STARTED", started_at: null, ends_at: null, remaining_seconds: 7200 },
+        team: { status: "NOT_STARTED", started_at: null, ends_at: null, remaining_seconds: 14400 },
       }),
     );
     const gate = document.querySelector("dialog.entry-gate")!;
     await waitFor(() => expect(gate).toHaveAttribute("open"));
     expect(screen.getByRole("heading", { name: "Enter the competition" })).toBeInTheDocument();
+    // the length of the competition is the server's number, not a constant in the screen
+    expect(gate).toHaveTextContent("Your team has 4 hours in total");
     c.enterCompetition.mockResolvedValue(c.ok(entered));
     const button = screen.getByRole("button", { name: "Enter competition" });
     fireEvent.click(button);
@@ -293,16 +300,30 @@ describe("TicketSpiral", () => {
     expect(screen.queryByRole("link", { name: "Let's solve" })).toBeNull();
   });
 
-  it("final dialog: Yes, submit and Go back both just close", async () => {
+  it("a teammate-visible entry gate for a 2-hour team reads 2 hours: the text follows the data", async () => {
+    withGame(
+      <EntryGate />,
+      snapshot({
+        team: {
+          status: "NOT_STARTED",
+          started_at: null,
+          ends_at: null,
+          duration_seconds: 7200,
+          remaining_seconds: 7200,
+        },
+      }),
+    );
+    expect(await screen.findByText(/Your team has 2 hours in total/)).toBeInTheDocument();
+  });
+
+  it("final dialog: Go back closes without calling the server", async () => {
     withGame(<TicketSpiral />);
     fireEvent.click(screen.getByRole("button", { name: /FINAL SUBMIT/ }));
     const finalDialog = screen.getByRole("dialog", { name: "Final Submit" });
     expect(finalDialog).toHaveAttribute("open");
-    expect(screen.getByRole("heading", { name: "Final Submit" })).toBeInTheDocument();
+    expect(screen.getByText(/cannot be undone/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Go back" }));
     await waitFor(() => expect(finalDialog).not.toHaveAttribute("open"));
-    fireEvent.click(screen.getByRole("button", { name: /FINAL SUBMIT/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Yes, submit" }));
-    await waitFor(() => expect(finalDialog).not.toHaveAttribute("open"));
+    expect(eco.finalSubmitCall).not.toHaveBeenCalled();
   });
 });

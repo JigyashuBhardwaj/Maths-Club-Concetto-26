@@ -5,7 +5,7 @@ Status: **proposal for review (Milestone 0).**
 ## 1. Principles
 
 1. **Realtime is a hint channel, not a data channel.** An event says *that* something changed (plus a version number), never *what* the new state is. The client reacts by fetching the authoritative snapshot over HTTPS. A lost, duplicated or out-of-order event is therefore harmless.
-2. **The product must work with Realtime completely down.** A slow poll (15 s) is always running as a safety net; the fast path is a bonus.
+2. **The product must work with Realtime completely down.** A slow poll (15 s) is always running as a safety net; the fast path is a bonus. *(B15: the poll is the only path in use. When a polled snapshot says a team's timer reached zero, the server persists `ENDED` on that read — see `ECONOMY_AND_FINALIZATION.md` §5.)*
 3. **Use Broadcast and Presence. Do not use `postgres_changes`.** It couples the UI to table shapes and performs per-subscriber authorisation work; it also makes the database a bottleneck for fan-out.
 4. **Channels are scoped as narrowly as possible** so message volume stays far below plan limits (§7).
 5. **Presence is informational only** (brief §24). It never changes competition state.

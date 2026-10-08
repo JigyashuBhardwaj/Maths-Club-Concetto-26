@@ -18,6 +18,8 @@ const q = {
   state: "ACTIVE",
   reward_coins: 50,
   time_limit_seconds: 240,
+  hints: [],
+  buy_time: { purchase_count: 0, extra_seconds: 0, can_buy: false, options: [] },
   body_md: "Find x.",
   deadline: 5,
   remaining_seconds: 4,

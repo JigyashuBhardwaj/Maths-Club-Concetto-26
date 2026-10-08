@@ -1,6 +1,6 @@
 /**
  * API error codes and their HTTP statuses (docs/API_SPEC.md §1–§2). Only the codes the implemented layers can produce
- * are listed (auth in B9, the competition runtime in B10, provisioning in B12, gameplay in B13); later patches extend the table rather than inventing codes
+ * are listed (auth in B9, the competition runtime in B10, provisioning in B12, gameplay in B13, economy and finalization in B15); later patches extend the table rather than inventing codes
  * in handlers.
  */
 export const ERROR_STATUS = {
@@ -30,6 +30,9 @@ export const ERROR_STATUS = {
   SUBMISSION_PENDING: 409,
   SUBMISSION_NOT_PENDING: 409,
   STALE_DRAFT: 409,
+  HINT_TIER1_REQUIRED: 409,
+  STALE_PURCHASE_COUNT: 409,
+  TIME_PURCHASE_LIMIT: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 
@@ -108,6 +111,9 @@ const DB_ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   SUBMISSION_PENDING: "A submission is already waiting for review.",
   SUBMISSION_NOT_PENDING: "This submission has already been reviewed.",
   STALE_DRAFT: "A teammate saved a newer draft.",
+  HINT_TIER1_REQUIRED: "Buy Hint 1 first.",
+  STALE_PURCHASE_COUNT: "A teammate just bought time for this question.",
+  TIME_PURCHASE_LIMIT: "That time option cannot be bought again.",
 };
 
 /** Only these codes may carry details, and only flat primitives: counts, state names and field names. */
@@ -118,6 +124,7 @@ const DETAILS_ALLOWED = new Set<ErrorCode>([
   "ADMISSION_NO_TAKEN",
   "INSUFFICIENT_COINS",
   "STALE_DRAFT",
+  "STALE_PURCHASE_COUNT",
 ]);
 
 function safeDetails(code: ErrorCode, raw: unknown): Record<string, unknown> | undefined {

@@ -112,6 +112,23 @@ export function player(ctx: APIRequestContext) {
       send(ctx, "put", `/api/p/questions/${questionId}/draft`, { answer, expectedVersion }),
     submit: (questionId: number, answer: string, key = randomUUID()) =>
       send(ctx, "post", `/api/p/questions/${questionId}/submit`, { answer }, key),
+    hint: (questionId: number, tier: number, key = randomUUID()) =>
+      send(ctx, "post", `/api/p/questions/${questionId}/hints`, { tier }, key),
+    buyTime: (
+      questionId: number,
+      optionId: number,
+      expectedPurchaseCount: number,
+      key = randomUUID(),
+    ) =>
+      send(
+        ctx,
+        "post",
+        `/api/p/questions/${questionId}/time`,
+        { optionId, expectedPurchaseCount },
+        key,
+      ),
+    finalSubmit: (key = randomUUID(), body: unknown = { confirm: true }) =>
+      send(ctx, "post", "/api/p/final-submit", body, key),
   };
 }
 
@@ -168,10 +185,45 @@ export async function inspect(team: E2ETeam): Promise<{
   status: string;
   startedAt: number | null;
   endsAt: number | null;
+  endedAt: number | null;
+  finalSubmittedAt: number | null;
+  timerSeconds: number | null;
+  hints: string[];
+  ledger: { type: string; amount: number; qid: number }[];
   themes: number[];
-  questions: Record<string, { state: string; deadline: number | null; remaining: number | null }>;
+  questions: Record<
+    string,
+    {
+      state: string;
+      deadline: number | null;
+      remaining: number | null;
+      timeCount: number;
+      extra: number;
+    }
+  >;
   submissions: { id: string; qid: number; status: string; reward: number | null }[];
   audit: string[];
 }> {
   return (await control("inspect", { loginId: team.loginId })) as never;
+}
+
+/** Time passes for one team only (see `ageTeam` in fake-gameplay.mjs): its clocks move `ms` towards their ends. */
+export async function ageTeam(
+  team: E2ETeam,
+  ms: number,
+  opts: { questions?: boolean } = {},
+): Promise<void> {
+  await control("ageTeam", { loginId: team.loginId, ms, questions: opts.questions ?? true });
+}
+
+/** A team started under the pre-B15 2-hour rule (its allowance snapshot stays 7200 whatever the competition says). */
+export async function makeLegacyTimer(team: E2ETeam, seconds = 7200): Promise<void> {
+  await control("legacyTimer", { loginId: team.loginId, seconds });
+}
+
+/** A signed-in API context for one member of a team. */
+export async function memberApi(team: E2ETeam, slot: 1 | 2 | 3 | 4): Promise<APIRequestContext> {
+  return api(
+    await loginForCookies("/api/auth/participant/login", participantCredentials(team, slot)),
+  );
 }

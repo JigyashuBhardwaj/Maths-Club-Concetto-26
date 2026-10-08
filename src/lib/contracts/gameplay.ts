@@ -51,6 +51,39 @@ export const disapproveSchema = z.strictObject({
 
 export const submissionStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
 
+/**
+ * A hint as the team sees it (B15). The price is always shown; the text only once the team owns it (the database
+ * omits `body_md` otherwise, and this schema has no other field that could carry it).
+ */
+export const hintSchema = z.object({
+  tier: z.number().int().min(1).max(2),
+  cost: z.number().int().nonnegative(),
+  owned: z.boolean(),
+  purchasable: z.boolean(),
+  body_md: z.string().optional(),
+});
+export type Hint = z.infer<typeof hintSchema>;
+
+/** One Buy Time option, read from the data (`question_buy_time_options`): seconds, price and purchase cap. */
+export const buyTimeOptionSchema = z.object({
+  id: z.number().int().positive(),
+  seconds: z.number().int().positive(),
+  cost: z.number().int().nonnegative(),
+  max_purchases: z.number().int().positive().nullable(),
+  purchased: z.number().int().nonnegative(),
+  remaining_purchases: z.number().int().nonnegative().nullable(),
+});
+export type BuyTimeOption = z.infer<typeof buyTimeOptionSchema>;
+
+/** The team's Buy Time state for one question. `options` is empty unless the question is ACTIVE. */
+export const buyTimeSchema = z.object({
+  purchase_count: z.number().int().nonnegative(),
+  extra_seconds: z.number().int().nonnegative(),
+  can_buy: z.boolean(),
+  options: z.array(buyTimeOptionSchema),
+});
+export type BuyTime = z.infer<typeof buyTimeSchema>;
+
 /** One question as the team sees it. There is deliberately no field for a reference answer or solution notes. */
 export const questionSchema = z.object({
   id: z.number().int().min(1).max(50),
@@ -60,6 +93,8 @@ export const questionSchema = z.object({
   state: z.enum(["AVAILABLE", "ACTIVE", "PENDING_APPROVAL", "APPROVED", "TIMED_OUT"]),
   reward_coins: z.number().int().nonnegative(),
   time_limit_seconds: z.number().int().positive(),
+  hints: z.array(hintSchema),
+  buy_time: buyTimeSchema,
   /** Withheld while the question is AVAILABLE: the body is delivered only once the team has entered it. */
   body_md: z.string().optional(),
   deadline: epochMs.optional(),

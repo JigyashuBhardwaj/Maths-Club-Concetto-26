@@ -20,9 +20,34 @@ export function serverTime(clientNow: number, offsetMs: number): number {
   return clientNow + offsetMs;
 }
 
-/** True while clocks run: the competition is RUNNING and the team is RUNNING (a pause freezes every timer). */
+/**
+ * True while clocks run: the competition is RUNNING, the team is RUNNING and the server has not frozen it (a pause
+ * freezes every timer; so does the team's own end, which the server reports as `frozen` even before ENDED is stored).
+ */
 export function clocksRunning(state: TeamState): boolean {
-  return state.competition.status === "RUNNING" && state.team.status === "RUNNING";
+  return (
+    state.competition.status === "RUNNING" && state.team.status === "RUNNING" && !state.team.frozen
+  );
+}
+
+/**
+ * True once the team can no longer play: it final-submitted, it ended, it was disqualified, or its own timer reached
+ * zero. The server's `frozen` flag is authoritative; the second test only covers the instants between the browser
+ * crossing `ends_at` and the next snapshot (a pause is NOT a freeze: the team resumes).
+ */
+export function teamFrozen(state: TeamState, nowServerMs: number): boolean {
+  if (state.team.frozen) return true;
+  return (
+    state.competition.status === "RUNNING" &&
+    state.team.status === "RUNNING" &&
+    state.team.ends_at !== null &&
+    nowServerMs >= state.team.ends_at
+  );
+}
+
+/** The team may act right now: clocks run and its own time is not up. Every participant action is gated on this. */
+export function canPlay(state: TeamState, nowServerMs: number): boolean {
+  return clocksRunning(state) && !teamFrozen(state, nowServerMs);
 }
 
 /** Whole seconds left on the TEAM timer. Ticks only while clocks run; otherwise the server's frozen value. */
@@ -42,7 +67,10 @@ export function questionRemainingMs(
 ): number {
   if (q.state === "ACTIVE" && q.deadline !== undefined) {
     if (!clocksRunning(state)) return (q.remaining_seconds ?? 0) * 1000;
-    return Math.max(0, q.deadline - nowServerMs);
+    // Bought time can push a question's deadline past the team's end, but never past the team's end as far as the
+    // clock goes: the question can only be worked on while the team still has time.
+    const end = state.team.ends_at === null ? q.deadline : Math.min(q.deadline, state.team.ends_at);
+    return Math.max(0, end - nowServerMs);
   }
   if (q.state === "PENDING_APPROVAL") return (q.remaining_seconds ?? 0) * 1000;
   return 0;

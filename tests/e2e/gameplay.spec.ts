@@ -119,14 +119,14 @@ test.describe("gameplay: two members of one team", () => {
 
     await gate1.getByRole("button", { name: "Enter competition" }).click();
     await expect(gate1).toBeHidden();
-    await expect(one.locator(".home-stats .stat-value").first()).toHaveText(/^0[12]:\d\d:\d\d$/);
+    await expect(one.locator(".home-stats .stat-value").first()).toHaveText(/^0[34]:\d\d:\d\d$/);
     t = await inspect(team);
     expect(t.status).toBe("RUNNING");
-    expect(t.endsAt! - t.startedAt!).toBe(7_200_000);
+    expect(t.endsAt! - t.startedAt!).toBe(14_400_000);
 
     // the second member never pressed anything: the next poll of the server removes their gate
     await expect(gate2).toBeHidden({ timeout: 20_000 });
-    await expect(two.locator(".home-stats .stat-value").first()).toHaveText(/^0[12]:\d\d:\d\d$/);
+    await expect(two.locator(".home-stats .stat-value").first()).toHaveText(/^0[34]:\d\d:\d\d$/);
 
     // a second entry (a retry, a teammate) neither restarts nor extends the timer
     const again = await player(api2).start();

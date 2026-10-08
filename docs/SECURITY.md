@@ -117,7 +117,7 @@ Authorisation is enforced **twice**: in the route handler (principal → allowed
 ## 6. Application hardening
 
 * **XSS:** React escapes by default; Markdown is rendered with raw HTML disabled; KaTeX rendered with `trust:false`. Strict CSP: `default-src 'self'`; `script-src 'self'` (nonces if needed); `connect-src 'self' https://<project>.supabase.co wss://<project>.supabase.co`; `frame-ancestors 'none'`.
-* **CSRF:** `SameSite=Lax` + `Origin` check on all non-GET.
+* **CSRF:** `SameSite=Lax` + `Origin` check on all non-GET. The one deliberate exception is `GET /api/cron/expire-teams` (B15): it has no cookie and no browser caller, is authenticated only by a bearer `CRON_SECRET` (≥ 32 characters, constant-time comparison, 401 before any database call, fail closed when unset), accepts no input, and returns a count. Other methods get 405.
 * **Input limits:** server-side length limits mirror the database `CHECK` constraints.
 * **Headers:** `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy: same-origin`, `Permissions-Policy` (fullscreen allowed for self).
 * **Dependencies:** minimal; `npm audit` and lockfile review in CI; no postinstall scripts from unknown packages.

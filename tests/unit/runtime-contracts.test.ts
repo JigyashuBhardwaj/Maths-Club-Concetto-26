@@ -22,9 +22,10 @@ const base = {
     ends_at: 2,
     ended_at: null,
     final_submitted_at: null,
-    duration_seconds: 7200,
+    duration_seconds: 14400,
     remaining_seconds: 100,
     expired: false,
+    frozen: false,
   },
   themes: [],
 };
@@ -41,12 +42,12 @@ const refRemaining = (endsAtMs: number, refMs: number) =>
 
 describe("timer formula boundary vectors (parity with the database tests)", () => {
   const start = 1_796_127_000_000; // 2026-12-01 12:10:00 UTC
-  const ends = start + 7_200_000;
+  const ends = start + 14_400_000;
   it.each([
-    ["at the start", start, 7200],
-    ["0.4 s in: 7199.6 floors to 7199", start + 400, 7199],
-    ["1 s in", start + 1000, 7199],
-    ["one hour in", start + 3_600_000, 3600],
+    ["at the start", start, 14400],
+    ["0.4 s in: 14399.6 floors to 14399", start + 400, 14399],
+    ["1 s in", start + 1000, 14399],
+    ["one hour in", start + 3_600_000, 10800],
     ["1 s left", ends - 1000, 1],
     ["0.5 s left floors to 0", ends - 500, 0],
     ["exactly at ends_at", ends, 0],
@@ -56,7 +57,7 @@ describe("timer formula boundary vectors (parity with the database tests)", () =
   });
   it("a paused competition freezes the reference at paused_at", () => {
     const pausedAt = start + 3_000_000;
-    expect(refRemaining(ends, Math.min(start + 9_000_000, pausedAt))).toBe(4200);
+    expect(refRemaining(ends, Math.min(start + 9_000_000, pausedAt))).toBe(11400);
   });
 });
 
@@ -65,10 +66,10 @@ describe("team state contract", () => {
     expect(
       teamStateSchema.safeParse(withTeam({ remaining_seconds: 0, expired: true })).success,
     ).toBe(true);
-    expect(teamStateSchema.safeParse(withTeam({ remaining_seconds: 7200 })).success).toBe(true);
+    expect(teamStateSchema.safeParse(withTeam({ remaining_seconds: 14400 })).success).toBe(true);
   });
   it.each([
-    ["more than the competition allows", { remaining_seconds: 7201 }],
+    ["more than the competition allows", { remaining_seconds: 14401 }],
     ["negative", { remaining_seconds: -1 }],
     ["fractional", { remaining_seconds: 10.5 }],
     ["a string", { remaining_seconds: "100" }],

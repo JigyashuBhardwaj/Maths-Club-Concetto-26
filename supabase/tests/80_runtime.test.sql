@@ -101,7 +101,7 @@ end $$;
 -- a key belongs to one operation + parameter
 select pg_temp.rejects($s$select pg_temp.status('pause', 10)$s$, 'IDEMPOTENCY_KEY_REUSED');
 
--- ===== 6/8/16. start while RUNNING: exactly 7200 s, audited =========================================================
+-- ===== 6/8/16. start while RUNNING: exactly 14400 s (B15: 4 h), audited =========================================================
 select pg_temp.at('2026-12-01 12:10:00+00');
 create temp table b_start as select pg_temp.tv(1) as tv, pg_temp.tv(2) as tv2;
 create temp table st1 as select pg_temp.start(1, 2, 20) as j;
@@ -111,10 +111,11 @@ begin
   select * into t from teams where id = pg_temp.team_id(1);
   assert (j->>'started_now')::boolean and not (j->>'replayed')::boolean;
   assert t.status = 'RUNNING' and t.started_at = timestamptz '2026-12-01 12:10:00+00', 'started at the authoritative now';
-  assert t.ends_at - t.started_at = interval '7200 seconds', 'exactly 7200 s';
-  assert t.ends_at = timestamptz '2026-12-01 14:10:00+00';
-  assert (j->'state'->'team'->>'started_at')::bigint = 1796127000000 and (j->'state'->'team'->>'ends_at')::bigint = 1796134200000, 'epoch ms in the response';
-  assert (j->'state'->'team'->>'remaining_seconds')::int = 7200 and (j->'state'->'team'->>'duration_seconds')::int = 7200;
+  assert t.ends_at - t.started_at = interval '14400 seconds', 'exactly 14400 s';
+  assert t.ends_at = timestamptz '2026-12-01 16:10:00+00';
+  assert t.timer_seconds = 14400, 'the allowance this team was given is stored (B15)';
+  assert (j->'state'->'team'->>'started_at')::bigint = 1796127000000 and (j->'state'->'team'->>'ends_at')::bigint = 1796141400000, 'epoch ms in the response';
+  assert (j->'state'->'team'->>'remaining_seconds')::int = 14400 and (j->'state'->'team'->>'duration_seconds')::int = 14400;
   assert j->'state'->'team'->>'status' = 'RUNNING' and j->'state'->'competition'->>'status' = 'RUNNING';
   assert (j->'state'->'team'->>'coins')::int = 500 and not (j->'state'->'team'->>'expired')::boolean;
   -- 18. version +1 for the started team only
@@ -123,7 +124,7 @@ begin
   -- 16. audit
   assert (select count(*) from audit_events where event_type = 'TEAM_STARTED' and team_id = pg_temp.team_id(1)) = 1;
   assert (select actor_kind = 'MEMBER' and member_id = pg_temp.member_id(1, 2) and request_id = pg_temp.key(20)
-                 and (payload->>'started_at')::bigint = 1796127000000 and (payload->>'ultimate_seconds')::int = 7200
+                 and (payload->>'started_at')::bigint = 1796127000000 and (payload->>'ultimate_seconds')::int = 14400
             from audit_events where event_type = 'TEAM_STARTED' and team_id = pg_temp.team_id(1));
   assert (select count(*) from coin_transactions where team_id = pg_temp.team_id(1)) = 1, 'starting touches no coins';
 end $$;
@@ -136,14 +137,14 @@ begin
   select * into t0 from teams where id = pg_temp.team_id(1);
   a := pg_temp.start(1, 2, 20);                         -- same member, same key: replay
   assert (a->>'replayed')::boolean and (a->>'started_now')::boolean, 'a replay returns the stored response';
-  assert a->'state'->'team'->>'started_at' = '1796127000000' and a->'state'->'team'->>'ends_at' = '1796134200000';
+  assert a->'state'->'team'->>'started_at' = '1796127000000' and a->'state'->'team'->>'ends_at' = '1796141400000';
   b := pg_temp.start(1, 2, 21);                         -- same member, new key (a re-entry)
   assert not (b->>'replayed')::boolean and not (b->>'started_now')::boolean, 'a second start does not start again';
   c := pg_temp.start(1, 3, 22);                         -- another member of the team, later
   assert not (c->>'started_now')::boolean;
   assert b->'state'->'team'->>'started_at' = '1796127000000' and c->'state'->'team'->>'started_at' = '1796127000000', 'same authoritative start';
-  assert b->'state'->'team'->>'ends_at' = '1796134200000' and c->'state'->'team'->>'ends_at' = '1796134200000', 'same authoritative end';
-  assert (c->'state'->'team'->>'remaining_seconds')::int = 6600, 'the later member sees the already reduced timer (CE-02)';
+  assert b->'state'->'team'->>'ends_at' = '1796141400000' and c->'state'->'team'->>'ends_at' = '1796141400000', 'same authoritative end';
+  assert (c->'state'->'team'->>'remaining_seconds')::int = 13800, 'the later member sees the already reduced timer (CE-02)';
   assert (select (started_at, ends_at) is not distinct from (t0.started_at, t0.ends_at) from teams where id = pg_temp.team_id(1)), 'the timer is never reset';
   assert pg_temp.tv(1) = tv0, 'no version bump for no-ops';
   assert (select count(*) from audit_events where event_type = 'TEAM_STARTED' and team_id = pg_temp.team_id(1)) = 1, 'one audit row';
@@ -165,13 +166,13 @@ do $$ begin
 end $$;
 
 -- ===== 12/13. authoritative remaining seconds; clamp to zero; never extended ========================================
-select pg_temp.at('2026-12-01 12:10:00+00');   do $$ begin assert pg_temp.remaining(1) = 7200; end $$;
-select pg_temp.at('2026-12-01 12:10:00.4+00'); do $$ begin assert pg_temp.remaining(1) = 7199, 'floor: 7199.6 -> 7199'; end $$;
-select pg_temp.at('2026-12-01 12:10:01+00');   do $$ begin assert pg_temp.remaining(1) = 7199; end $$;
-select pg_temp.at('2026-12-01 13:10:00+00');   do $$ begin assert pg_temp.remaining(1) = 3600; end $$;
-select pg_temp.at('2026-12-01 14:09:59+00');   do $$ begin assert pg_temp.remaining(1) = 1 and not (pg_temp.state(1, 1)->'team'->>'expired')::boolean; end $$;
-select pg_temp.at('2026-12-01 14:09:59.5+00'); do $$ begin assert pg_temp.remaining(1) = 0, '0.5 s left floors to 0'; assert not (pg_temp.state(1, 1)->'team'->>'expired')::boolean, 'not yet expired'; end $$;
-select pg_temp.at('2026-12-01 14:10:00+00');   do $$ begin assert pg_temp.remaining(1) = 0 and (pg_temp.state(1, 1)->'team'->>'expired')::boolean, 'exactly at ends_at: 0 and expired'; end $$;
+select pg_temp.at('2026-12-01 12:10:00+00');   do $$ begin assert pg_temp.remaining(1) = 14400; end $$;
+select pg_temp.at('2026-12-01 12:10:00.4+00'); do $$ begin assert pg_temp.remaining(1) = 14399, 'floor: 14399.6 -> 14399'; end $$;
+select pg_temp.at('2026-12-01 12:10:01+00');   do $$ begin assert pg_temp.remaining(1) = 14399; end $$;
+select pg_temp.at('2026-12-01 15:10:00+00');   do $$ begin assert pg_temp.remaining(1) = 3600; end $$;
+select pg_temp.at('2026-12-01 16:09:59+00');   do $$ begin assert pg_temp.remaining(1) = 1 and not (pg_temp.state(1, 1)->'team'->>'expired')::boolean; end $$;
+select pg_temp.at('2026-12-01 16:09:59.5+00'); do $$ begin assert pg_temp.remaining(1) = 0, '0.5 s left floors to 0'; assert not (pg_temp.state(1, 1)->'team'->>'expired')::boolean, 'not yet expired'; end $$;
+select pg_temp.at('2026-12-01 16:10:00+00');   do $$ begin assert pg_temp.remaining(1) = 0 and (pg_temp.state(1, 1)->'team'->>'expired')::boolean, 'exactly at ends_at: 0 and expired'; end $$;
 select pg_temp.at('2026-12-01 20:00:00+00');
 do $$
 declare s jsonb; t0 teams%rowtype; r jsonb; tv0 bigint := pg_temp.tv(1);
@@ -179,10 +180,10 @@ begin
   s := pg_temp.state(1, 1);
   assert (s->'team'->>'remaining_seconds')::int = 0, 'clamped to zero long after expiry (never negative)';
   assert (s->'team'->>'expired')::boolean and s->'team'->>'status' = 'RUNNING', 'an expired team is reported, not silently changed';
-  assert (select started_at = timestamptz '2026-12-01 12:10:00+00' and ends_at = timestamptz '2026-12-01 14:10:00+00' and status = 'RUNNING'
+  assert (select started_at = timestamptz '2026-12-01 12:10:00+00' and ends_at = timestamptz '2026-12-01 16:10:00+00' and status = 'RUNNING'
             from teams where id = pg_temp.team_id(1)), 'the timer is neither reset nor extended by reading it';
   r := pg_temp.start(1, 1, 40);                          -- entering again after expiry returns the same times
-  assert not (r->>'started_now')::boolean and r->'state'->'team'->>'started_at' = '1796127000000' and r->'state'->'team'->>'ends_at' = '1796134200000';
+  assert not (r->>'started_now')::boolean and r->'state'->'team'->>'started_at' = '1796127000000' and r->'state'->'team'->>'ends_at' = '1796141400000';
   assert pg_temp.tv(1) = tv0, 'reading and re-entering never bump the version';
   assert (select count(*) from audit_events where event_type = 'TEAM_STARTED' and team_id = pg_temp.team_id(1)) = 1;
 end $$;
@@ -190,7 +191,7 @@ end $$;
 do $$
 declare s jsonb := pg_temp.state(2, 1);
 begin
-  assert s->'team'->>'status' = 'NOT_STARTED' and (s->'team'->>'remaining_seconds')::int = 7200;
+  assert s->'team'->>'status' = 'NOT_STARTED' and (s->'team'->>'remaining_seconds')::int = 14400 and (s->'team'->>'duration_seconds')::int = 14400;
   assert s->'team'->'started_at' = 'null'::jsonb and s->'team'->'ends_at' = 'null'::jsonb and s->'team'->'ended_at' = 'null'::jsonb;
   assert jsonb_array_length(s->'themes') = 10 and (select bool_and(t->>'status' = 'LOCKED' and t->'questions' = '[]'::jsonb) from jsonb_array_elements(s->'themes') t),
          'all 10 themes LOCKED with no question data';
@@ -213,7 +214,7 @@ do $$
 declare t uuid;
 begin
   -- FINAL_SUBMITTED / ENDED / DISQUALIFIED are set directly by test setup (their operations arrive in later patches)
-  update teams set status = 'FINAL_SUBMITTED', started_at = '2026-12-01 12:30:00+00', ends_at = '2026-12-01 14:30:00+00',
+  update teams set status = 'FINAL_SUBMITTED', started_at = '2026-12-01 12:30:00+00', ends_at = '2026-12-01 14:30:00+00', timer_seconds = 7200,
                    ended_at = '2026-12-01 13:00:00+00', final_submitted_at = '2026-12-01 13:00:00+00'
    where id = pg_temp.team_id(2);
   begin perform pg_temp.start(2, 1, 50); raise exception 'FINAL_SUBMITTED team was started';
@@ -226,7 +227,7 @@ begin
   exception when others then if sqlerrm <> 'TEAM_ENDED' then raise; end if; end;
   assert (select status = 'DISQUALIFIED' and started_at = '2026-12-01 12:30:00+00' from teams where id = pg_temp.team_id(2)), 'timer untouched';
   assert (select count(*) from request_log where idem_key in (pg_temp.key(50), pg_temp.key(51), pg_temp.key(52))) = 0, 'rejections are not stored';
-  update teams set status = 'NOT_STARTED', started_at = null, ends_at = null, ended_at = null, score_override = null where id = pg_temp.team_id(2);
+  update teams set status = 'NOT_STARTED', started_at = null, timer_seconds = null, ends_at = null, ended_at = null, score_override = null where id = pg_temp.team_id(2);
 end $$;
 
 -- ===== 7. PAUSED: no start (A); freeze; resume shifts exactly the paused duration ==================================
@@ -255,13 +256,13 @@ begin
   assert (select status = 'NOT_STARTED' and started_at is null from teams where id = pg_temp.team_id(2)), 'no timer started during a pause';
   perform pg_temp.at('2026-12-01 13:00:00+00');
   rem0 := pg_temp.remaining(1);
-  assert rem0 = 4200, 'team 1: 14:10 - 13:00 = 4200 s';
+  assert rem0 = 11400, 'team 1: 16:10 - 13:00 = 11400 s';
   -- every clock reads the instant of the pause
   perform pg_temp.at('2026-12-01 13:25:00+00');
-  assert pg_temp.remaining(1) = 4200, 'the team clock is frozen while PAUSED';
+  assert pg_temp.remaining(1) = 11400, 'the team clock is frozen while PAUSED';
   assert pg_temp.state(1, 1)->'competition'->>'status' = 'PAUSED';
   r := pg_temp.start(1, 1, 62);                        -- an already-running team may re-enter: existing state, no mutation
-  assert not (r->>'started_now')::boolean and (r->'state'->'team'->>'remaining_seconds')::int = 4200;
+  assert not (r->>'started_now')::boolean and (r->'state'->'team'->>'remaining_seconds')::int = 11400;
 end $$;
 do $$ begin assert not (pg_temp.status('pause', 64)->>'changed')::boolean, 'pause when PAUSED is a no-op'; end $$;
 select pg_temp.rejects($s$select pg_temp.status('open', 65)$s$, 'INVALID_COMPETITION_TRANSITION');   -- open only from SETUP
@@ -274,17 +275,17 @@ declare j jsonb := (select j from s_resume);
 begin
   assert (j->>'changed')::boolean and (j->>'paused_seconds')::int = 1800 and (j->>'teams_shifted')::int = 1 and (j->>'teams_ended')::int = 0;
   assert (select status = 'RUNNING' and paused_at is null from competition);
-  assert (select ends_at = timestamptz '2026-12-01 14:40:00+00' and started_at = timestamptz '2026-12-01 12:10:00+00' from teams where id = pg_temp.team_id(1)),
+  assert (select ends_at = timestamptz '2026-12-01 16:40:00+00' and started_at = timestamptz '2026-12-01 12:10:00+00' from teams where id = pg_temp.team_id(1)),
          'ends_at moved by exactly the paused duration';
-  assert (select ends_at - started_at = interval '9000 seconds' from teams where id = pg_temp.team_id(1)), 'wall span is 7200 + pause';
+  assert (select ends_at - started_at = interval '16200 seconds' from teams where id = pg_temp.team_id(1)), 'wall span is 14400 + pause';
   assert (select timer_deadline = timestamptz '2026-12-01 14:00:00+00' from team_questions where team_id = pg_temp.team_id(1) and question_id = 1), 'ACTIVE question deadline shifted equally';
   assert (select status = 'NOT_STARTED' and ends_at is null from teams where id = pg_temp.team_id(2)), 'a NOT_STARTED team is not shifted';
-  assert pg_temp.remaining(1) = 4200, 'remaining time after resume equals remaining time at pause';
+  assert pg_temp.remaining(1) = 11400, 'remaining time after resume equals remaining time at pause';
   assert pg_temp.cv() = (select cv from b_resume) + 1 and pg_temp.tv(1) = (select t1 from b_resume) + 1 and pg_temp.tv(2) = (select t2 from b_resume) + 1;
   assert (select (payload->>'paused_seconds')::int = 1800 from audit_events where request_id = pg_temp.key(66)), 'audited with the delta';
   assert (select count(*) from audit_events where event_type = 'COMPETITION_STATUS_CHANGED') = 3, 'open, pause, resume';
   assert (pg_temp.status('resume', 66)->>'replayed')::boolean, 'a resume retry does not shift twice';
-  assert (select ends_at = timestamptz '2026-12-01 14:40:00+00' from teams where id = pg_temp.team_id(1)), 'still shifted once';
+  assert (select ends_at = timestamptz '2026-12-01 16:40:00+00' from teams where id = pg_temp.team_id(1)), 'still shifted once';
 end $$;
 -- team 2 can start now that the competition runs again
 do $$
@@ -292,8 +293,8 @@ declare r jsonb;
 begin
   perform pg_temp.at('2026-12-01 13:31:00+00');
   r := pg_temp.start(2, 4, 67);
-  assert (r->>'started_now')::boolean and (r->'state'->'team'->>'remaining_seconds')::int = 7200;
-  assert (select ends_at - started_at = interval '7200 seconds' from teams where id = pg_temp.team_id(2));
+  assert (r->>'started_now')::boolean and (r->'state'->'team'->>'remaining_seconds')::int = 14400;
+  assert (select ends_at - started_at = interval '14400 seconds' from teams where id = pg_temp.team_id(2));
 end $$;
 
 rollback;
@@ -318,14 +319,14 @@ create function pg_temp.state(t int, s int) returns jsonb language sql as
 
 select pg_temp.status('open', 1);
 select pg_temp.at('2026-12-01 12:00:00+00');
-select pg_temp.start(1, 1, 2);                                  -- team 1: 12:00 -> 14:00
+select pg_temp.start(1, 1, 2);                                  -- team 1: 12:00 -> 16:00 (4 h)
 
 -- expired before the pause: must be ENDED by resume (ended_at = its scheduled end), never shifted back to life
-select pg_temp.at('2026-12-01 14:30:00+00');
-select pg_temp.start(2, 1, 3);                                  -- team 2: 14:30 -> 16:30
-select pg_temp.at('2026-12-01 14:45:00+00');
-select pg_temp.status('pause', 4);                              -- paused at 14:45: team 1 already expired at 14:00
-select pg_temp.at('2026-12-01 15:15:00+00');
+select pg_temp.at('2026-12-01 16:30:00+00');
+select pg_temp.start(2, 1, 3);                                  -- team 2: 16:30 -> 20:30
+select pg_temp.at('2026-12-01 16:45:00+00');
+select pg_temp.status('pause', 4);                              -- paused at 16:45: team 1 already expired at 16:00
+select pg_temp.at('2026-12-01 17:15:00+00');
 do $$
 declare r jsonb;
 begin
@@ -333,31 +334,31 @@ begin
   assert (select status = 'RUNNING' from teams where id = pg_temp.team_id(1)), 'reading does not end it';
   r := pg_temp.status('resume', 5);                             -- 30 min pause
   assert (r->>'paused_seconds')::int = 1800 and (r->>'teams_ended')::int = 1 and (r->>'teams_shifted')::int = 1, 'one ended, one shifted';
-  assert (select status = 'ENDED' and ended_at = timestamptz '2026-12-01 14:00:00+00' and ends_at = timestamptz '2026-12-01 14:00:00+00'
+  assert (select status = 'ENDED' and ended_at = timestamptz '2026-12-01 16:00:00+00' and ends_at = timestamptz '2026-12-01 16:00:00+00'
             from teams where id = pg_temp.team_id(1)), 'ended at its scheduled end, not extended';
-  assert (select ends_at = timestamptz '2026-12-01 17:00:00+00' from teams where id = pg_temp.team_id(2)), 'the live team was shifted by 30 min';
+  assert (select ends_at = timestamptz '2026-12-01 21:00:00+00' from teams where id = pg_temp.team_id(2)), 'the live team was shifted by 30 min';
   assert (select count(*) from audit_events where event_type = 'TEAM_ENDED' and team_id = pg_temp.team_id(1) and payload->>'reason' = 'TIMER' and actor_kind = 'STAFF') = 1;
   assert (pg_temp.state(1, 1)->'team'->>'status') = 'ENDED' and (pg_temp.state(1, 1)->'team'->>'remaining_seconds')::int = 0;
 end $$;
 
 -- end while PAUSED: the competition and every RUNNING team end at the instant of the pause
-select pg_temp.at('2026-12-01 15:30:00+00');
-select pg_temp.status('pause', 6);                              -- team 2: ends 17:00, 90 min left at the pause
-select pg_temp.at('2026-12-01 16:30:00+00');
+select pg_temp.at('2026-12-01 17:30:00+00');
+select pg_temp.status('pause', 6);                              -- team 2: ends 21:00, 210 min left at the pause
+select pg_temp.at('2026-12-01 18:30:00+00');
 create temp table b_end as select (select state_version from competition) as cv, (select state_version from teams where id = pg_temp.team_id(2)) as t2;
 do $$
 declare r jsonb;
 begin
   r := pg_temp.status('end', 7);
   assert (r->>'changed')::boolean and r->>'to' = 'ENDED' and (r->>'teams_ended')::int = 1;
-  assert (select status = 'ENDED' and ended_at = timestamptz '2026-12-01 16:30:00+00' and paused_at is null from competition);
-  assert (select status = 'ENDED' and ended_at = timestamptz '2026-12-01 15:30:00+00' from teams where id = pg_temp.team_id(2)), 'ended at the pause instant (clocks were frozen)';
+  assert (select status = 'ENDED' and ended_at = timestamptz '2026-12-01 18:30:00+00' and paused_at is null from competition);
+  assert (select status = 'ENDED' and ended_at = timestamptz '2026-12-01 17:30:00+00' from teams where id = pg_temp.team_id(2)), 'ended at the pause instant (clocks were frozen)';
   assert (select count(*) from teams where status = 'RUNNING') = 0;
   assert (select count(*) from audit_events where event_type = 'TEAM_ENDED' and payload->>'reason' = 'COMPETITION_ENDED') = 1;
   assert (select count(*) from audit_events where event_type = 'COMPETITION_STATUS_CHANGED' and payload->>'to' = 'ENDED') = 1;
   assert (select state_version from competition) = (select cv from b_end) + 1 and (select state_version from teams where id = pg_temp.team_id(2)) = (select t2 from b_end) + 1;
-  -- 90 min were left at the pause and stay frozen at ended_at
-  assert (pg_temp.state(2, 1)->'team'->>'remaining_seconds')::int = 5400 and pg_temp.state(2, 1)->'team'->>'status' = 'ENDED';
+  -- 210 min were left at the pause and stay frozen at ended_at
+  assert (pg_temp.state(2, 1)->'team'->>'remaining_seconds')::int = 12600 and pg_temp.state(2, 1)->'team'->>'status' = 'ENDED';
   assert (pg_temp.state(2, 1)->'competition'->>'status') = 'ENDED';
   assert not (pg_temp.status('end', 8)->>'changed')::boolean, 'end when ENDED is a no-op';
 end $$;

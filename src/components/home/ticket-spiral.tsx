@@ -5,7 +5,7 @@ import { useRef, useState, type CSSProperties } from "react";
 import { useGame } from "@/components/game/game-provider";
 import { cn } from "@/lib/utils";
 import { STEP_DEG } from "@/lib/home/spiral";
-import { FINAL_TICKET, TICKETS, type Ticket } from "@/lib/home/themes";
+import { TICKETS, type Ticket } from "@/lib/home/themes";
 
 import { FinalSubmitDialog } from "./final-submit-dialog";
 import { ThemeDialog } from "./theme-dialog";
@@ -20,6 +20,7 @@ export function TicketSpiral() {
   const [selected, setSelected] = useState<Ticket>(TICKETS[0]!);
   const [open, setOpen] = useState(false);
   const { state } = useGame();
+  const submitted = state?.team.status === "FINAL_SUBMITTED";
   const unlockedCodes = new Set(
     (state?.themes ?? []).filter((t) => t.status !== "LOCKED").map((t) => t.code),
   );
@@ -79,7 +80,9 @@ export function TicketSpiral() {
               <span className="ticket-stub" aria-hidden="true">
                 {ticket.kind === "final" ? "★" : ticket.id}
               </span>
-              <span className="ticket-label">{ticket.label}</span>
+              <span className="ticket-label">
+                {ticket.kind === "final" && submitted ? "SUBMITTED" : ticket.label}
+              </span>
             </button>
           ))}
         </div>
@@ -90,11 +93,7 @@ export function TicketSpiral() {
         open={open && selected.kind === "theme"}
         onClose={close}
       />
-      <FinalSubmitDialog
-        ticket={FINAL_TICKET}
-        open={open && selected.kind === "final"}
-        onClose={close}
-      />
+      <FinalSubmitDialog open={open && selected.kind === "final"} onClose={close} />
     </section>
   );
 }

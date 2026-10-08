@@ -53,7 +53,7 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 
 | ID | Scenario | Layer |
 |----|----------|-------|
-| CE-01 | The first *Enter competition* (after rules + fullscreen acknowledgement) starts the team timer; `ends_at = started_at + 7,200 s` | DB |
+| CE-01 | The first *Enter competition* (after rules + fullscreen acknowledgement) starts the team timer; `ends_at = started_at + timer_seconds` (**B15: 14,400 s**; a team started before B15 keeps 7,200) | DB |
 | CE-02 | Second member entering later sees the already-reduced timer; second start call does not restart it | DB/E2E |
 | CE-03 | Timer is server-authoritative: manipulated client clock changes nothing (API contains no time input) | API/E2E |
 | CE-04 | Team timer keeps running while a question is `PENDING_APPROVAL` | DB |
@@ -64,7 +64,7 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 | CE-09 | Team timer reaches 0 → team `ENDED`, `ended_at = ends_at`, all mutations rejected, score frozen | DB |
 | CE-10 | Final submit freezes everything; second call → `ALREADY_SUBMITTED` | DB |
 | CE-11 | Global pause freezes all clocks; resume shifts deadlines by exactly the paused duration | DB |
-| CE-12 | Sweeper ends idle expired teams without any user request; `ended_at` equals scheduled end | DB |
+| CE-12 | Sweeper ends idle expired teams without any user request; `ended_at` equals scheduled end. **B15:** `expire_due_teams` via the Vercel Cron route (bearer `CRON_SECRET`), not `pg_cron` | DB/API/E2E |
 | CE-13 | Submit with an answer already `PENDING` → `SUBMISSION_PENDING` | DB |
 | CE-16 | Logging in (any number of members, any number of times) never starts or changes the team timer; `team.status` stays `NOT_STARTED` | DB/E2E |
 | CE-17 | Unlocking a theme leaves Q1 `AVAILABLE` with `timer_deadline IS NULL`; Q2–Q5 `LOCKED`; no question timer starts | DB |
@@ -72,6 +72,13 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 | CE-19 | Two themes with an `ACTIVE` question each run independent timers: submitting, approving, disapproving or timing out one leaves the other's deadline unchanged; both shift equally on a global pause | DB |
 | CE-20 | Approval starts the next question's timer at the approval instant; a team that has ended starts nothing | DB |
 | CE-21 | Two members enter Q1 simultaneously (parallel connections) → activated exactly once, both receive the identical deadline, one `QUESTION_STARTED` audit row | DB |
+| CE-22 | **B15.** A team starting now stores `timer_seconds = 14400`; teams started earlier keep 7200, their original `started_at`/`ends_at`, and are not extended by the migration (upgrade test) | DB |
+| CE-23 | **B15.** `finalize_team_if_due` / `expire_due_teams` end a due team at its own `ends_at`, time out only questions due by then, never touch coins or the ledger, are idempotent, and do nothing while the competition is paused | DB |
+| CE-24 | **B15.** Lazy finalization: a read of an expired team persists `ENDED`; a refused action returns `TEAM_ENDED` and the end is still persisted by the follow-up finalize | API/E2E |
+| CE-25 | **B15.** Hints: team-wide, charged once from `hints.cost`, Tier 2 needs Tier 1, allowed on `ACTIVE`/`PENDING_APPROVAL`/`APPROVED`, refused otherwise; `INSUFFICIENT_COINS` charges nothing; replay of the same key charges nothing | DB/API/E2E |
+| CE-26 | **B15.** Buy Time: moves only the question deadline, never `teams.ends_at`; `STALE_PURCHASE_COUNT` for the second of two simultaneous buyers; `TIME_PURCHASE_LIMIT`; exactly-once under 16-team concurrency | DB/concurrency/E2E |
+| CE-27 | **B15.** Final Submit and timer end freeze the same things: every participant mutation refused, reads allowed, remaining time constant, pending answers still reviewable (pay once, no next question), persists across logout/login | DB/API/E2E |
+| CE-28 | **B15.** `GET /api/cron/expire-teams`: 401 before any database call without the exact secret, fail-closed without `CRON_SECRET`, 405 for other methods, `{finalized: n}` only | unit/E2E |
 | CE-14 | Can work on theme B while theme A question is pending | DB/E2E |
 | CE-15 | Different members work on different themes simultaneously | E2E |
 
@@ -185,6 +192,7 @@ Each repeats 200× with randomised interleavings; all must end with `check_invar
 | E2E-09 | Responsive/a11y smoke: keyboard-only through unlock + submit; reduced-motion respected |
 | E2E-10 | Unlock a theme → no timer anywhere; opening Q1 starts its timer (no Start button in the UI); a teammate opening it afterwards sees the same deadline |
 | E2E-11 | Previous approved question shows only the team's own answer, explanation, state and reviewer note — never the reference answer |
+| E2E-12 | **B15.** `economy.spec`: hints and Buy Time through the API and the dialogs; `final-submit.spec`: the irreversible action and its freeze; `timer-end.spec`: 4 h, kept 2 h, ENDED at zero; `cron.spec` (own project, runs last): the sweep |
 
 ## 5. Load tests (brief §38) — nothing is claimed until these are run
 

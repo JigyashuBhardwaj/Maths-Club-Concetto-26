@@ -13,7 +13,7 @@ One line per requirement extracted from the Master Brief, with where this design
 | REQ-007 | Member identity & online/offline known | 3, 24 | DATA_MODEL §3.5, §4; REALTIME §4 |
 | REQ-008 | Team creation form fields; auto-assignment to creating admin | 4 | API_SPEC §5 |
 | REQ-009 | 500 coins at start | 5, 7 | DATA_MODEL §3.9 (`INITIAL_GRANT`) |
-| REQ-010 | 2-hour (7,200 s) team timer starts once, when a participant actually enters the competition (after rules and fullscreen acknowledgement) — never at login; same for all members | 5 | STATE §5.1; DEC-01 |
+| REQ-010 | **B15: 4-hour (14,400 s) team timer for teams that start from B15 on; teams started earlier keep 7,200 s (stored per team in `teams.timer_seconds`).** The timer starts once, when a participant actually enters the competition (after rules and fullscreen acknowledgement) — never at login; same for all members | 5 | STATE §5.1; DEC-01 |
 | REQ-011 | Timer authoritative on server; browser never authoritative | 5, 6, 18 | ARCH §6; STATE §1.3 |
 | REQ-012 | Team timer continues during pending, browsing, logout | 6 | STATE §4 |
 | REQ-013 | Question timer starts when the question becomes `ACTIVE` (Q1: when a participant enters it; later questions: on approval of the previous one) — not on theme unlock; several may run at once; pauses at submit; resumes on disapproval | 6, 16 | STATE §4, §5.2a, §5.6–5.7; DEC-26 |

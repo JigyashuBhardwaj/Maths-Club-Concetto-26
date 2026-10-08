@@ -42,7 +42,10 @@ export function ThemeDialog({ ticket, open, onClose }: ThemeDialogProps) {
   const unlocked = theme ? isUnlocked(theme) : false;
   const coins = state?.team.coins ?? 0;
   const cost = theme?.unlock_cost ?? null;
-  const live = state?.competition.status === "RUNNING" && state.team.status === "RUNNING";
+  const live =
+    state?.competition.status === "RUNNING" &&
+    state.team.status === "RUNNING" &&
+    !state.team.frozen;
   const affordable = cost !== null && coins >= cost;
   const solveHref = `/participant/theme/${ticket.id}/${theme ? currentOrdinal(theme) : 1}`;
 

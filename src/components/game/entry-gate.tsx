@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { enterCompetition } from "@/lib/gameplay/client";
 import { gameErrorText, isRetryable } from "@/lib/gameplay/messages";
+import { describeDuration } from "@/lib/home/format";
 import { newIdempotencyKey } from "@/lib/provisioning/client";
 
 import { useGame } from "./game-provider";
@@ -65,7 +66,7 @@ export function EntryGate() {
         </h2>
         <p className="dialog-text">
           {canEnter
-            ? "Your team has 2 hours in total. The team timer starts for everyone the moment the first member enters, and it keeps running until the time is up."
+            ? `Your team has ${describeDuration(state.team.duration_seconds)} in total. The team timer starts for everyone the moment the first member enters, and it keeps running until the time is up.`
             : competition === "PAUSED"
               ? "The competition is paused. You can enter once the organisers resume it."
               : "The competition is not open yet. This page will update when it opens."}

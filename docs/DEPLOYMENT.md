@@ -49,8 +49,11 @@ Claude workspace repo ──patch+notes──▶ human review ──apply──�
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | **yes** | Calling engine functions |
 | `SUPABASE_JWT_SECRET` (or signing key, per Supabase's current scheme) | **server only** | **yes** | Minting short-lived Realtime tokens |
 | `SESSION_TOKEN_PEPPER` | server only | yes | HMAC pepper when hashing session tokens |
+| `CRON_SECRET` | server only | yes | **B15.** Bearer token of `GET /api/cron/expire-teams`; at least 32 random characters. Vercel Cron sends it automatically once it is defined in the project's environment. Without it the route answers 401 to everyone (fail closed) and lazy finalization alone keeps the game correct |
 | `SUPABASE_DB_URL` | CI / local only | yes | Migrations and DB tests (never in the app runtime) |
 | `PROVISION_DATABASE_URL` | operator's shell, **one-off** | yes | `provision:superadmin` only (direct PostgreSQL URL of the database owner); never stored in Vercel or Git. The Super Admin's username and password are typed at the prompt, never in the environment |
+
+**Scheduled sweep (B15).** `vercel.json` registers `/api/cron/expire-teams` once a day (`17 3 * * *`, the only frequency the Hobby plan accepts). On the Pro plan change it to `* * * * *` for per-minute convergence. It is a safety net only; no `pg_cron` is installed or assumed. Production hint prices are changed by the separate human-run `B15-hint-prices.sql`, never by a migration.
 
 `.env.example` documents names without values. The build fails if a `NEXT_PUBLIC_*` variable has a name containing `SECRET`, `SERVICE` or `JWT`.
 

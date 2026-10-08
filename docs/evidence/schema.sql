@@ -3069,3 +3069,845 @@ grant execute on function app.presence_timeout_seconds()                      to
 grant execute on function app.require_owner_admin(uuid, uuid)                 to service_role;
 grant execute on function public.admin_matrix(uuid)                           to service_role;
 grant execute on function public.admin_team_theme(uuid, uuid, text)          to service_role;
+
+-- ===== 20261006000016_timer_14400_and_finalization.sql =====
+-- Patch B15 / migration 16 — the 4-hour Ultimate Team Timer, a per-team allowance snapshot, and persisted
+-- auto-finalization at zero.
+--
+-- Why it is safe for teams that are already playing: the competition-wide value (`competition.ultimate_seconds`) is only
+-- READ when a team STARTS (start_team_competition). A team that has already started keeps the absolute `started_at` /
+-- `ends_at` it was given, so changing the value changes nothing for it. This migration never writes `started_at`,
+-- `ends_at`, `ended_at`, `coins` or `status` of any team. The only column it fills on a started team is the new
+-- `teams.timer_seconds` (= 7200, the allowance that team actually received); `updated_at` follows via the existing
+-- touch trigger. Teams that have not started yet get 14400 s when they first enter. No team is ever extended.
+--
+-- Contents
+--   1. competition.ultimate_seconds: 7200 -> 14400 (default, the row, the locking CHECK).
+--   2. teams.timer_seconds: the allowance a team was given when it started (NULL until it starts).
+--   3. teams.final_minutes_taken: the 0..120 upper bound belonged to the 2 h timer; scoring (B16) owns the rounding.
+--   4. start_team_competition (re-declared): also stores timer_seconds.
+--   5. app.team_state_json (re-declared): per-team duration_seconds and the `frozen` flag.
+--   6. finalize_team_if_due / expire_due_teams: the persisted RUNNING -> ENDED transition at zero. No pg_cron needed.
+--   7. State versions of NOT_STARTED teams (their snapshot duration changed) and one SYSTEM audit row.
+--
+-- Everything else (lock order, idempotency, error codes, privileges) follows the B10/B13 conventions.
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- 1. The competition-wide allowance for teams that start from now on
+-- ---------------------------------------------------------------------------------------------------------------
+alter table competition drop constraint competition_ultimate_locked_7200;
+alter table competition alter column ultimate_seconds set default 14400;
+update competition set ultimate_seconds = 14400 where id = 1;          -- ultimate_minutes (generated) becomes 240
+alter table competition add constraint competition_ultimate_locked_14400 check (ultimate_seconds = 14400);
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- 2. The per-team snapshot. Teams that started under the 2 h rule keep exactly that allowance.
+-- ---------------------------------------------------------------------------------------------------------------
+alter table teams add column timer_seconds int;
+update teams set timer_seconds = 7200 where started_at is not null;     -- the allowance every pre-B15 team was given
+alter table teams add constraint teams_timer_seconds_iff_started
+  check ((timer_seconds is not null) = (started_at is not null) and (timer_seconds is null or timer_seconds > 0));
+comment on column teams.timer_seconds is
+  'Ultimate Team Timer allowance in seconds, copied from competition.ultimate_seconds when the team started '
+  '(7200 for teams that started before B15, 14400 afterwards). NULL until the team starts. Never edited afterwards.';
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- 3. final_minutes_taken: a 4 h team can legitimately exceed 120. Scoring (B16) computes and rounds it.
+-- ---------------------------------------------------------------------------------------------------------------
+alter table teams drop constraint teams_final_minutes_taken_check;
+alter table teams add constraint teams_final_minutes_taken_nonneg
+  check (final_minutes_taken is null or final_minutes_taken >= 0);
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- 4. start_team_competition — unchanged apart from storing the allowance in teams.timer_seconds.
+-- ---------------------------------------------------------------------------------------------------------------
+create or replace function public.start_team_competition(p_team_id uuid, p_member_id uuid, p_idem_key uuid) returns jsonb
+language plpgsql security definer
+set search_path = pg_catalog, public, extensions, app, pg_temp
+as $$
+declare
+  v_now     timestamptz;
+  v_team    teams%rowtype;
+  v_comp    competition%rowtype;
+  v_fp      text := 'member:' || coalesce(p_member_id::text, '');
+  v_replay  jsonb;
+  v_started boolean := false;
+  v_resp    jsonb;
+begin
+  if p_team_id is null or p_member_id is null
+     or not exists (select 1 from team_members where id = p_member_id and team_id = p_team_id) then
+    perform app.fail('FORBIDDEN');                                     -- a member can only act for their own team
+  end if;
+  if p_idem_key is null then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('idempotencyKey')));
+  end if;
+
+  v_team := app.lock_team(p_team_id);                                  -- competition (share) → team (update)
+
+  v_replay := app.idem_lookup(p_team_id, p_idem_key, 'start_team_competition', v_fp);
+  if v_replay is not null then
+    return v_replay || '{"replayed": true}'::jsonb;
+  end if;
+
+  select * into v_comp from competition where id = 1;
+
+  if v_team.status <> 'RUNNING' then
+    if v_comp.id is null or v_comp.status in ('SETUP', 'ENDED') then
+      perform app.fail('COMPETITION_NOT_RUNNING');
+    elsif v_comp.status = 'PAUSED' then
+      perform app.fail('COMPETITION_PAUSED');
+    end if;
+    if v_team.status = 'FINAL_SUBMITTED' then
+      perform app.fail('ALREADY_SUBMITTED');
+    elsif v_team.status <> 'NOT_STARTED' then
+      perform app.fail('TEAM_ENDED');                                  -- ENDED or DISQUALIFIED
+    end if;
+
+    v_now := app.now();
+    update teams
+       set status = 'RUNNING',
+           started_at = v_now,
+           ends_at = v_now + make_interval(secs => v_comp.ultimate_seconds),
+           timer_seconds = v_comp.ultimate_seconds,                    -- B15: the allowance this team was given
+           state_version = state_version + 1
+     where id = p_team_id;
+
+    insert into audit_events (occurred_at, actor_kind, member_id, team_id, event_type, entity_type, entity_id, payload, request_id)
+    values (v_now, 'MEMBER', p_member_id, p_team_id, 'TEAM_STARTED', 'TEAM', p_team_id::text,
+            jsonb_build_object('started_at', app.epoch_ms(v_now),
+                               'ends_at', app.epoch_ms(v_now + make_interval(secs => v_comp.ultimate_seconds)),
+                               'ultimate_seconds', v_comp.ultimate_seconds),
+            p_idem_key);
+    v_started := true;
+  end if;
+
+  v_resp := jsonb_build_object('replayed', false, 'started_now', v_started,
+                               'state', app.team_state_json(p_team_id, p_member_id));
+  perform app.idem_store(p_team_id, p_idem_key, 'start_team_competition', v_fp, v_resp);
+  return v_resp;
+end $$;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- 5. app.team_state_json — B13 body, with two changes only:
+--      * team.duration_seconds is the TEAM's own allowance (teams.timer_seconds, falling back to the competition value
+--        for a team that has not started), so a team that started under the 2 h rule keeps reporting 7200;
+--      * team.frozen: true once the team can no longer play (FINAL_SUBMITTED / ENDED / DISQUALIFIED, or the timer ran out
+--        and the ENDED row has not been written yet). A pause is NOT "frozen" (it is a competition status).
+-- Still a pure read.
+-- ---------------------------------------------------------------------------------------------------------------
+create or replace function app.team_state_json(p_team_id uuid, p_member_id uuid) returns jsonb
+language plpgsql stable
+set search_path = pg_catalog, public, app, pg_temp
+as $$
+declare
+  v_now    timestamptz := app.now();
+  t        teams%rowtype;
+  c        competition%rowtype;
+  m        team_members%rowtype;
+  v_ref    timestamptz;
+  v_qref   timestamptz;
+  v_rem    int;
+  v_themes jsonb;
+  v_expired boolean;
+begin
+  select * into t from teams where id = p_team_id;
+  select * into c from competition where id = 1;
+  select * into m from team_members where id = p_member_id and team_id = p_team_id;
+  if t.id is null or m.id is null or c.id is null then
+    perform app.fail('NOT_FOUND');
+  end if;
+
+  v_ref := app.team_clock(t);
+  v_qref := app.question_clock(t);
+  v_rem := case when t.ends_at is null then c.ultimate_seconds
+                else greatest(0, floor(extract(epoch from (t.ends_at - v_ref))))::int end;
+  v_expired := (t.status = 'RUNNING' and v_ref >= t.ends_at);
+
+  select coalesce(jsonb_agg(
+           jsonb_build_object(
+             'id', th.id,
+             'code', th.code,
+             'name', th.name,
+             'description', th.description,
+             'topics', to_jsonb(th.topics),
+             'difficulty', th.difficulty,
+             'unlock_cost', th.unlock_cost,
+             'status', case when tt.theme_id is null then 'LOCKED'
+                            when coalesce(p.timed_out, false) then 'FAILED'
+                            when coalesce(p.completed, false) then 'COMPLETED'
+                            else 'IN_PROGRESS' end,
+             'questions', coalesce(qs.arr, '[]'::jsonb))
+           order by th.display_order), '[]'::jsonb)
+    into v_themes
+    from themes th
+    left join team_themes tt on tt.team_id = p_team_id and tt.theme_id = th.id
+    left join lateral (
+      select count(*) filter (where q.state = 'APPROVED') = 5 as completed,
+             bool_or(q.state = 'TIMED_OUT' or (q.state = 'ACTIVE' and q.timer_deadline <= v_qref)) as timed_out
+        from team_questions q
+       where q.team_id = p_team_id and q.theme_id = th.id) p on true
+    left join lateral (
+      select jsonb_agg(
+               jsonb_build_object('id', q.question_id, 'ordinal', q.ordinal, 'state', e.state)
+               || case when e.state <> 'LOCKED'
+                       then jsonb_build_object('reward_coins', qq.reward_coins,
+                                               'time_limit_seconds', qq.time_limit_seconds)
+                       else '{}'::jsonb end
+               || case when e.state = 'ACTIVE'
+                       then jsonb_build_object('deadline', app.epoch_ms(q.timer_deadline),
+                                               'remaining_seconds',
+                                               greatest(0, floor(extract(epoch from (q.timer_deadline - v_qref))))::int)
+                       when e.state = 'PENDING_APPROVAL'
+                       then jsonb_build_object('remaining_seconds', q.timer_remaining_seconds)
+                       else '{}'::jsonb end
+               order by q.ordinal) as arr
+        from team_questions q
+        join questions qq on qq.id = q.question_id
+        cross join lateral (select case when q.state = 'ACTIVE' and q.timer_deadline <= v_qref
+                                        then 'TIMED_OUT' else q.state::text end as state) e
+       where q.team_id = p_team_id and q.theme_id = th.id) qs on true;
+
+  return jsonb_build_object(
+    'server_now', app.epoch_ms(v_now),
+    'state_version', t.state_version,
+    'competition', jsonb_build_object('status', c.status),
+    'me', jsonb_build_object('member_id', m.id, 'slot', m.slot, 'team_id', t.id,
+                             'team_code', t.team_code, 'team_name', t.name),
+    'team', jsonb_build_object(
+      'status', t.status,
+      'coins', t.coins,
+      'started_at', app.epoch_ms(t.started_at),
+      'ends_at', app.epoch_ms(t.ends_at),
+      'ended_at', app.epoch_ms(t.ended_at),
+      'final_submitted_at', app.epoch_ms(t.final_submitted_at),
+      'duration_seconds', coalesce(t.timer_seconds, c.ultimate_seconds),
+      'remaining_seconds', v_rem,
+      'expired', v_expired,
+      'frozen', (t.status in ('FINAL_SUBMITTED', 'ENDED', 'DISQUALIFIED') or v_expired)),
+    'themes', v_themes);
+end $$;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- 6. Persisted auto-finalization at zero (RUNNING -> ENDED). The rule "nothing succeeds at or after ends_at" is already
+-- enforced on every request by app.assert_playable; these functions only WRITE the transition, so the stored status
+-- catches up with what every read already reports. They do not depend on pg_cron: the API calls
+-- finalize_team_if_due whenever anyone on a team loads its state, and expire_due_teams is a safety net that a scheduler
+-- (a Vercel Cron route today) may call.
+--
+--   * ended_at = the team's own ends_at (NOT the moment the function happens to run), so the result is the same whenever
+--     and however it is processed. Already-overdue ACTIVE questions become TIMED_OUT (app.expire_team); a question whose
+--     own deadline is still later stays ACTIVE and is shown frozen. Coins, ledger and submissions are not touched.
+--   * Only while the competition is RUNNING. During a pause nothing is due; `resume` / `end` already end such teams.
+--   * Idempotent and non-raising: a team that is not due (or already terminal) returns finalized:false and changes nothing.
+--   * Lock order is the global one: competition (share) -> team (update). expire_due_teams uses SKIP LOCKED, so it never
+--     queues behind a live participant request.
+-- ---------------------------------------------------------------------------------------------------------------
+create function public.finalize_team_if_due(p_team_id uuid) returns jsonb
+language plpgsql security definer
+set search_path = pg_catalog, public, extensions, app, pg_temp
+as $$
+declare
+  v_team teams%rowtype;
+  v_comp competition%rowtype;
+begin
+  v_team := app.lock_team(p_team_id);                                  -- NOT_FOUND for an unknown team
+  select * into v_comp from competition where id = 1;
+  if v_comp.status = 'RUNNING' and v_team.status = 'RUNNING' and app.now() >= v_team.ends_at then
+    perform app.expire_team(p_team_id, 'TIMER', v_team.ends_at);
+    update teams set state_version = state_version + 1 where id = p_team_id;
+    return jsonb_build_object('finalized', true, 'status', 'ENDED');
+  end if;
+  return jsonb_build_object('finalized', false, 'status', v_team.status);
+end $$;
+
+create function public.expire_due_teams(p_limit int default 200) returns int
+language plpgsql security definer
+set search_path = pg_catalog, public, extensions, app, pg_temp
+as $$
+declare
+  v_comp competition%rowtype;
+  v_n    int := 0;
+  r      record;
+begin
+  if p_limit is null or p_limit < 1 or p_limit > 1000 then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('limit')));
+  end if;
+  select * into v_comp from competition where id = 1 for share;        -- competition first, then teams
+  if not found or v_comp.status <> 'RUNNING' then
+    return 0;
+  end if;
+  for r in
+    select id, ends_at from teams
+     where status = 'RUNNING' and ends_at <= app.now()
+     order by ends_at, id
+     limit p_limit
+       for update skip locked
+  loop
+    perform app.expire_team(r.id, 'TIMER', r.ends_at);
+    update teams set state_version = state_version + 1 where id = r.id;
+    v_n := v_n + 1;
+  end loop;
+  return v_n;
+end $$;
+
+-- explicit for the two re-declared functions as well (CREATE OR REPLACE keeps their old privileges; stating them again
+-- makes this file self-describing and idempotent)
+revoke all on function public.start_team_competition(uuid, uuid, uuid) from public, anon, authenticated;
+revoke all on function app.team_state_json(uuid, uuid)                 from public, anon, authenticated;
+revoke all on function public.finalize_team_if_due(uuid)               from public, anon, authenticated;
+revoke all on function public.expire_due_teams(int)                    from public, anon, authenticated;
+grant execute on function public.start_team_competition(uuid, uuid, uuid) to service_role;
+grant execute on function app.team_state_json(uuid, uuid)                 to service_role;
+grant execute on function public.finalize_team_if_due(uuid)               to service_role;
+grant execute on function public.expire_due_teams(int)                    to service_role;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- 7. Teams that have not started: their snapshot's duration_seconds just changed (7200 -> 14400), so clients holding an
+-- older snapshot should adopt the new one. Started teams are NOT written (their snapshot content is unchanged).
+-- One SYSTEM audit row records the change and what it did NOT touch.
+-- ---------------------------------------------------------------------------------------------------------------
+update teams set state_version = state_version + 1 where status = 'NOT_STARTED';
+
+insert into audit_events (occurred_at, actor_kind, event_type, entity_type, entity_id, payload)
+select app.now(), 'SYSTEM', 'TIMER_CONFIG_CHANGED', 'COMPETITION', '1',
+       jsonb_build_object('from_seconds', 7200, 'to_seconds', 14400,
+                          'started_teams_kept_at_7200', (select count(*) from teams where timer_seconds = 7200),
+                          'not_started_teams', (select count(*) from teams where status = 'NOT_STARTED'))
+ where exists (select 1 from competition where id = 1);          -- a fresh database has no competition row yet
+
+-- ===== 20261006000017_economy_and_final_submit.sql =====
+-- Patch B15 / migration 17 — real Hint purchases, real Buy Time, Final Submit with a terminal freeze.
+--
+-- Three new participant operations, all built on the B10/B13 engine exactly as unlock_theme is:
+--     assert_member -> key present -> app.lock_team (competition share -> team update) -> idem_lookup -> assert_playable
+--     -> settle_questions -> validate -> balance check -> coins + ledger + purchase row + state_version -> audit -> idem_store
+--   * buy_hint(team, member, question, tier, key)
+--   * buy_time(team, member, question, option, expected_purchase_count, key)
+--   * final_submit(team, member, confirm, key)
+-- Any rejection RAISES (P0001 + stable code), which rolls back every write, so there is never a partial charge.
+--
+-- Prices, rewards and durations are DATA: a hint costs hints.cost, a Buy Time option adds question_buy_time_options.seconds
+-- for question_buy_time_options.cost. Nothing below contains 20, 40, 80, 100 or 50. Each purchase row stores the price
+-- actually paid, so later content edits never rewrite history.
+--
+-- Also here:
+--   * app.question_json (re-declared, additive): `hints` (cost, owned, purchasable, and body_md ONLY once the team owns it)
+--     and `buy_time` (purchase_count, extra_seconds, can_buy, options). Nothing else in it changes.
+--   * public.disapprove_submission (re-declared): the only change is the deadline given back to a question when the
+--     team can no longer play. It was `now + frozen remaining`; on a frozen team the clock reads the team's end, so it
+--     would have shown far more time than the question had when it was frozen. It is now `question clock + frozen remaining`
+--     (identical to before for a live team, where the question clock is `now`).
+--
+-- Privileges: explicit REVOKE from PUBLIC/anon/authenticated and GRANT to service_role for every function.
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- app.question_json — B13 body plus `hints` and `buy_time`. Participant-safe by construction (never question_keys, only
+-- the team's own rows). A hint's text is included ONLY when this team has bought it; the price is always shown.
+--   hints[]   { tier, cost, owned, purchasable, body_md? }       purchasable = the team can buy it right now
+--   buy_time  { purchase_count, extra_seconds, can_buy, options: [{ id, seconds, cost, max_purchases, purchased,
+--               remaining_purchases }] }                          options are listed only while the question is ACTIVE
+-- ---------------------------------------------------------------------------------------------------------------
+create or replace function app.question_json(p_team_id uuid, p_question_id smallint) returns jsonb
+language plpgsql stable
+set search_path = pg_catalog, public, app, pg_temp
+as $$
+declare
+  t      teams%rowtype;
+  qq     questions%rowtype;
+  tq     team_questions%rowtype;
+  v_qref timestamptz;
+  v_state text;
+  v_out  jsonb;
+  d      answer_drafts%rowtype;
+  s      submissions%rowtype;
+  v_slot smallint;
+  v_live boolean;
+  v_has_t1 boolean;
+  v_hints jsonb;
+  v_buy  jsonb;
+begin
+  select * into t from teams where id = p_team_id;
+  select * into qq from questions where id = p_question_id;
+  if t.id is null or qq.id is null then
+    perform app.fail('NOT_FOUND');
+  end if;
+  select * into tq from team_questions where team_id = p_team_id and question_id = p_question_id;
+  if not found then
+    perform app.fail(case when exists (select 1 from team_themes where team_id = p_team_id and theme_id = qq.theme_id)
+                          then 'NOT_FOUND' else 'THEME_LOCKED' end);
+  end if;
+
+  v_qref := app.question_clock(t);
+  v_state := case when tq.state = 'ACTIVE' and tq.timer_deadline <= v_qref then 'TIMED_OUT' else tq.state::text end;
+  if v_state = 'LOCKED' then
+    perform app.fail('QUESTION_NOT_ACTIVE');
+  end if;
+
+  -- can the team spend right now? (competition running, team running, its own timer not yet at zero)
+  v_live := (select c.status = 'RUNNING' from competition c where c.id = 1)
+            and t.status = 'RUNNING' and app.now() < t.ends_at;
+
+  v_has_t1 := exists (select 1 from hint_purchases p join hints h on h.id = p.hint_id
+                       where p.team_id = p_team_id and h.question_id = p_question_id and h.tier = 1);
+  select coalesce(jsonb_agg(
+           jsonb_build_object(
+             'tier', h.tier,
+             'cost', h.cost,
+             'owned', hp.hint_id is not null,
+             'purchasable', v_live and v_state in ('ACTIVE', 'PENDING_APPROVAL', 'APPROVED')
+                            and hp.hint_id is null and (h.tier = 1 or v_has_t1))
+           || case when hp.hint_id is not null then jsonb_build_object('body_md', h.body_md) else '{}'::jsonb end
+           order by h.tier), '[]'::jsonb)
+    into v_hints
+    from hints h
+    left join hint_purchases hp on hp.hint_id = h.id and hp.team_id = p_team_id
+   where h.question_id = p_question_id;
+
+  v_buy := jsonb_build_object('purchase_count', tq.time_purchase_count, 'extra_seconds', tq.extra_seconds,
+                              'can_buy', v_live and v_state = 'ACTIVE', 'options', '[]'::jsonb);
+  if v_state = 'ACTIVE' then
+    select jsonb_set(v_buy, '{options}', coalesce(jsonb_agg(
+             jsonb_build_object(
+               'id', o.id, 'seconds', o.seconds, 'cost', o.cost, 'max_purchases', o.max_purchases,
+               'purchased', coalesce(u.n, 0),
+               'remaining_purchases', case when o.max_purchases is null then null
+                                           else greatest(o.max_purchases - coalesce(u.n, 0), 0) end)
+             order by o.display_order), '[]'::jsonb))
+      into v_buy
+      from question_buy_time_options o
+      left join lateral (select count(*)::int as n from team_time_purchases x
+                          where x.team_id = p_team_id and x.question_id = p_question_id and x.option_id = o.id) u on true
+     where o.question_id = p_question_id;
+  end if;
+
+  v_out := jsonb_build_object(
+    'id', qq.id,
+    'theme_id', qq.theme_id,
+    'theme_code', (select code from themes where id = qq.theme_id),
+    'ordinal', qq.ordinal,
+    'state', v_state,
+    'reward_coins', qq.reward_coins,
+    'time_limit_seconds', qq.time_limit_seconds,
+    'hints', v_hints,
+    'buy_time', v_buy);
+
+  if v_state = 'AVAILABLE' then
+    return v_out;                                     -- metadata only: the body is withheld until the team enters
+  end if;
+
+  v_out := v_out || jsonb_build_object('body_md', qq.body_md);
+  if v_state = 'ACTIVE' then
+    v_out := v_out || jsonb_build_object(
+      'deadline', app.epoch_ms(tq.timer_deadline),
+      'remaining_seconds', greatest(0, floor(extract(epoch from (tq.timer_deadline - v_qref))))::int);
+  elsif v_state = 'PENDING_APPROVAL' then
+    v_out := v_out || jsonb_build_object('remaining_seconds', tq.timer_remaining_seconds);
+  end if;
+
+  select * into d from answer_drafts where team_id = p_team_id and question_id = p_question_id;
+  select slot into v_slot from team_members where id = d.updated_by;
+  v_out := v_out || jsonb_build_object('draft', jsonb_build_object(
+    'answer', coalesce(d.answer, ''), 'explanation', coalesce(d.explanation, ''),
+    'version', coalesce(d.version, 0), 'updated_by_slot', v_slot,
+    'updated_at', app.epoch_ms(d.updated_at)));
+
+  -- the team's own live submission (pending, or the approved one); never another team's, never a reviewer key
+  select * into s from submissions
+   where team_id = p_team_id and question_id = p_question_id and status in ('PENDING', 'APPROVED')
+   order by submitted_at desc limit 1;
+  if found then
+    select slot into v_slot from team_members where id = s.member_id;
+    v_out := v_out || jsonb_build_object('submission', jsonb_build_object(
+      'id', s.id, 'status', s.status, 'answer', s.answer, 'explanation', s.explanation,
+      'submitted_by_slot', v_slot, 'submitted_at', app.epoch_ms(s.submitted_at),
+      'reviewed_at', app.epoch_ms(s.reviewed_at), 'review_note', s.review_note,
+      'reward_awarded', s.reward_awarded));
+  end if;
+
+  if v_state = 'ACTIVE' then
+    select * into s from submissions
+     where team_id = p_team_id and question_id = p_question_id and status = 'REJECTED'
+     order by reviewed_at desc limit 1;
+    if found then
+      v_out := v_out || jsonb_build_object('last_rejection', jsonb_build_object(
+        'note', s.review_note, 'reviewed_at', app.epoch_ms(s.reviewed_at)));
+    end if;
+  end if;
+  return v_out;
+end $$;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- buy_hint(team_id, member_id, question_id, tier, idempotency_key)                         participant, TEAM-WIDE
+-- A hint bought by one member belongs to the whole team (hint_purchases is keyed by team + hint). The price is read from
+-- hints.cost under the team lock and charged once. Allowed while the question is ACTIVE, PENDING_APPROVAL or APPROVED
+-- (a hint is a reading aid and costs no question time); refused on LOCKED / AVAILABLE (QUESTION_NOT_ACTIVE) and
+-- TIMED_OUT (QUESTION_TIMED_OUT). Tier 2 needs Tier 1 of the same question (HINT_TIER1_REQUIRED, nothing charged).
+-- Buying a hint the team already owns succeeds with already_owned = true: no charge, no ledger row, no version bump.
+--   Rejections: FORBIDDEN · VALIDATION_FAILED (tier / key) · COMPETITION_NOT_RUNNING · COMPETITION_PAUSED ·
+--               TEAM_NOT_STARTED · TEAM_ENDED · ALREADY_SUBMITTED · NOT_FOUND (question, or no hint at that tier) ·
+--               THEME_LOCKED · QUESTION_NOT_ACTIVE · QUESTION_TIMED_OUT · HINT_TIER1_REQUIRED ·
+--               INSUFFICIENT_COINS {have, need}
+-- Result: { replayed, already_owned, tier, hint: { tier, body_md }, question: <app.question_json>, state: <snapshot> }
+-- ---------------------------------------------------------------------------------------------------------------
+create function public.buy_hint(p_team_id uuid, p_member_id uuid, p_question_id smallint, p_tier smallint, p_idem_key uuid) returns jsonb
+language plpgsql security definer
+set search_path = pg_catalog, public, extensions, app, pg_temp
+as $$
+declare
+  v_team    teams%rowtype;
+  v_tq      team_questions%rowtype;
+  v_hint    hints%rowtype;
+  v_fp      text := 'question:' || coalesce(p_question_id::text, '') || '|tier:' || coalesce(p_tier::text, '')
+                    || '|member:' || coalesce(p_member_id::text, '');
+  v_replay  jsonb;
+  v_now     timestamptz;
+  v_balance int;
+  v_owned   boolean;
+  v_resp    jsonb;
+begin
+  perform app.assert_member(p_team_id, p_member_id);
+  if p_idem_key is null then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('idempotencyKey')));
+  end if;
+  if p_question_id is null or p_tier is null or p_tier not in (1, 2) then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('tier')));
+  end if;
+
+  v_team := app.lock_team(p_team_id);
+  v_replay := app.idem_lookup(p_team_id, p_idem_key, 'buy_hint', v_fp);
+  if v_replay is not null then
+    return v_replay || '{"replayed": true}'::jsonb;
+  end if;
+
+  perform app.assert_playable(v_team);
+  perform app.settle_questions(p_team_id);
+
+  perform 1 from questions where id = p_question_id;
+  if not found then
+    perform app.fail('NOT_FOUND');
+  end if;
+  select * into v_tq from team_questions where team_id = p_team_id and question_id = p_question_id for update;
+  if not found then
+    perform app.fail('THEME_LOCKED');
+  end if;
+  if v_tq.state = 'TIMED_OUT' then
+    perform app.fail('QUESTION_TIMED_OUT');
+  elsif v_tq.state not in ('ACTIVE', 'PENDING_APPROVAL', 'APPROVED') then
+    perform app.fail('QUESTION_NOT_ACTIVE');                           -- LOCKED, AVAILABLE
+  end if;
+
+  select * into v_hint from hints where question_id = p_question_id and tier = p_tier;
+  if not found then
+    perform app.fail('NOT_FOUND');                                     -- the content has no hint at that tier
+  end if;
+
+  v_owned := exists (select 1 from hint_purchases where team_id = p_team_id and hint_id = v_hint.id);
+  if not v_owned then
+    if p_tier = 2 and not exists (select 1 from hint_purchases p join hints h on h.id = p.hint_id
+                                   where p.team_id = p_team_id and h.question_id = p_question_id and h.tier = 1) then
+      perform app.fail('HINT_TIER1_REQUIRED');                         -- nothing charged
+    end if;
+    if v_team.coins < v_hint.cost then
+      perform app.fail('INSUFFICIENT_COINS', jsonb_build_object('have', v_team.coins, 'need', v_hint.cost));
+    end if;
+
+    v_now := app.now();
+    update teams set coins = coins - v_hint.cost, state_version = state_version + 1
+     where id = p_team_id returning coins into v_balance;
+    if v_hint.cost > 0 then
+      insert into coin_transactions (team_id, type, amount, balance_after, hint_id, question_id, member_id, created_at)
+      values (p_team_id, 'HINT_PURCHASE', -v_hint.cost, v_balance, v_hint.id, p_question_id, p_member_id, v_now);
+    end if;
+    insert into hint_purchases (team_id, hint_id, purchased_by, cost_paid, purchased_at)
+    values (p_team_id, v_hint.id, p_member_id, v_hint.cost, v_now);
+
+    insert into audit_events (occurred_at, actor_kind, member_id, team_id, event_type, entity_type, entity_id, payload, request_id)
+    values (v_now, 'MEMBER', p_member_id, p_team_id, 'HINT_PURCHASED', 'HINT', v_hint.id::text,
+            jsonb_build_object('question_id', p_question_id, 'tier', p_tier, 'hint_id', v_hint.id, 'cost', v_hint.cost,
+                               'balance_before', v_team.coins, 'balance_after', v_balance),
+            p_idem_key);
+  end if;
+
+  v_resp := jsonb_build_object('replayed', false, 'already_owned', v_owned, 'tier', p_tier,
+                               'hint', jsonb_build_object('tier', p_tier, 'body_md', v_hint.body_md),
+                               'question', app.question_json(p_team_id, p_question_id),
+                               'state', app.team_state_json(p_team_id, p_member_id));
+  perform app.idem_store(p_team_id, p_idem_key, 'buy_hint', v_fp, v_resp);
+  return v_resp;
+end $$;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- buy_time(team_id, member_id, question_id, option_id, expected_purchase_count, idempotency_key)    participant, TEAM-WIDE
+-- Moves the deadline of THIS question for the whole team by the option's seconds and charges the option's cost. It never
+-- writes teams.ends_at: the Ultimate Team Timer is not extended, and the question's playable time stays bounded by it
+-- (app.question_clock), so seconds that would run past the team's end simply cannot be used.
+-- expected_purchase_count is the number of purchases the caller saw; if another member bought in the meantime the answer
+-- is STALE_PURCHASE_COUNT {count} and nothing is charged (two members cannot buy twice by accident). Only an ACTIVE
+-- question can be extended (an overdue one was just settled to TIMED_OUT; PENDING_APPROVAL has a frozen timer).
+--   Rejections: FORBIDDEN · VALIDATION_FAILED · COMPETITION_NOT_RUNNING · COMPETITION_PAUSED · TEAM_NOT_STARTED ·
+--               TEAM_ENDED · ALREADY_SUBMITTED · NOT_FOUND (question / option of another question) · THEME_LOCKED ·
+--               QUESTION_TIMED_OUT · QUESTION_NOT_ACTIVE · STALE_PURCHASE_COUNT {count} · TIME_PURCHASE_LIMIT ·
+--               INSUFFICIENT_COINS {have, need}
+-- Result: { replayed, purchase: { seq, option_id, seconds, cost }, question: <app.question_json>, state: <snapshot> }
+-- ---------------------------------------------------------------------------------------------------------------
+create function public.buy_time(p_team_id uuid, p_member_id uuid, p_question_id smallint, p_option_id smallint,
+                                p_expected_count int, p_idem_key uuid) returns jsonb
+language plpgsql security definer
+set search_path = pg_catalog, public, extensions, app, pg_temp
+as $$
+declare
+  v_team    teams%rowtype;
+  v_tq      team_questions%rowtype;
+  v_opt     question_buy_time_options%rowtype;
+  v_fp      text := 'question:' || coalesce(p_question_id::text, '') || '|option:' || coalesce(p_option_id::text, '')
+                    || '|expected:' || coalesce(p_expected_count::text, '') || '|member:' || coalesce(p_member_id::text, '');
+  v_replay  jsonb;
+  v_now     timestamptz;
+  v_used    int;
+  v_seq     int;
+  v_balance int;
+  v_old_dl  timestamptz;
+  v_new_dl  timestamptz;
+  v_resp    jsonb;
+begin
+  perform app.assert_member(p_team_id, p_member_id);
+  if p_idem_key is null then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('idempotencyKey')));
+  end if;
+  if p_question_id is null or p_option_id is null or p_expected_count is null or p_expected_count < 0 then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('optionId', 'expectedPurchaseCount')));
+  end if;
+
+  v_team := app.lock_team(p_team_id);
+  v_replay := app.idem_lookup(p_team_id, p_idem_key, 'buy_time', v_fp);
+  if v_replay is not null then
+    return v_replay || '{"replayed": true}'::jsonb;
+  end if;
+
+  perform app.assert_playable(v_team);
+  perform app.settle_questions(p_team_id);
+
+  perform 1 from questions where id = p_question_id;
+  if not found then
+    perform app.fail('NOT_FOUND');
+  end if;
+  select * into v_tq from team_questions where team_id = p_team_id and question_id = p_question_id for update;
+  if not found then
+    perform app.fail('THEME_LOCKED');
+  end if;
+  if v_tq.state = 'TIMED_OUT' then
+    perform app.fail('QUESTION_TIMED_OUT');
+  elsif v_tq.state <> 'ACTIVE' then
+    perform app.fail('QUESTION_NOT_ACTIVE');                           -- LOCKED, AVAILABLE, PENDING_APPROVAL, APPROVED
+  end if;
+  if v_tq.time_purchase_count <> p_expected_count then
+    perform app.fail('STALE_PURCHASE_COUNT', jsonb_build_object('count', v_tq.time_purchase_count));
+  end if;
+
+  select * into v_opt from question_buy_time_options where id = p_option_id and question_id = p_question_id;
+  if not found then
+    perform app.fail('NOT_FOUND');
+  end if;
+  select count(*) into v_used from team_time_purchases
+   where team_id = p_team_id and question_id = p_question_id and option_id = p_option_id;
+  if v_opt.max_purchases is not null and v_used >= v_opt.max_purchases then
+    perform app.fail('TIME_PURCHASE_LIMIT');
+  end if;
+  if v_team.coins < v_opt.cost then
+    perform app.fail('INSUFFICIENT_COINS', jsonb_build_object('have', v_team.coins, 'need', v_opt.cost));
+  end if;
+
+  v_now := app.now();
+  v_seq := v_tq.time_purchase_count + 1;
+  v_old_dl := v_tq.timer_deadline;
+  v_new_dl := v_tq.timer_deadline + make_interval(secs => v_opt.seconds);
+
+  update teams set coins = coins - v_opt.cost, state_version = state_version + 1
+   where id = p_team_id returning coins into v_balance;                -- teams.ends_at is deliberately NOT touched
+  if v_opt.cost > 0 then
+    insert into coin_transactions (team_id, type, amount, balance_after, question_id, purchase_seq, member_id, created_at)
+    values (p_team_id, 'TIME_PURCHASE', -v_opt.cost, v_balance, p_question_id, v_seq, p_member_id, v_now);
+  end if;
+  insert into team_time_purchases (team_id, question_id, seq, option_id, seconds_added, cost_paid, purchased_by, purchased_at)
+  values (p_team_id, p_question_id, v_seq, p_option_id, v_opt.seconds, v_opt.cost, p_member_id, v_now);
+  update team_questions
+     set timer_deadline = v_new_dl, extra_seconds = extra_seconds + v_opt.seconds, time_purchase_count = v_seq
+   where team_id = p_team_id and question_id = p_question_id;
+
+  insert into audit_events (occurred_at, actor_kind, member_id, team_id, event_type, entity_type, entity_id, payload, request_id)
+  values (v_now, 'MEMBER', p_member_id, p_team_id, 'TIME_PURCHASED', 'QUESTION', p_question_id::text,
+          jsonb_build_object('question_id', p_question_id, 'option_id', p_option_id, 'seq', v_seq,
+                             'seconds', v_opt.seconds, 'cost', v_opt.cost,
+                             'old_deadline', app.epoch_ms(v_old_dl), 'new_deadline', app.epoch_ms(v_new_dl),
+                             'balance_before', v_team.coins, 'balance_after', v_balance),
+          p_idem_key);
+
+  v_resp := jsonb_build_object('replayed', false,
+                               'purchase', jsonb_build_object('seq', v_seq, 'option_id', p_option_id,
+                                                              'seconds', v_opt.seconds, 'cost', v_opt.cost),
+                               'question', app.question_json(p_team_id, p_question_id),
+                               'state', app.team_state_json(p_team_id, p_member_id));
+  perform app.idem_store(p_team_id, p_idem_key, 'buy_time', v_fp, v_resp);
+  return v_resp;
+end $$;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- final_submit(team_id, member_id, confirm, idempotency_key)                                participant, TEAM-WIDE
+-- The team ends its own run: status FINAL_SUBMITTED, ended_at = now, final_submitted_at/by recorded, in one UPDATE under
+-- the team lock. This is the same terminal freeze as the timer reaching zero: every clock reads ended_at from then on,
+-- remaining time is constant, and every participant mutation is refused by app.assert_playable (ALREADY_SUBMITTED).
+-- It persists across logout / login because it is only database state. Answers waiting for review stay reviewable
+-- (approve pays once; the next question does not open). Scores (final_*) are NOT computed here (B16).
+-- `confirm` must be true. The losing caller of a race gets ALREADY_SUBMITTED; a team whose timer ran out first gets
+-- TEAM_ENDED (it is ENDED, not FINAL_SUBMITTED); while the competition is paused: COMPETITION_PAUSED.
+-- Result: { replayed, state: <snapshot> }
+-- ---------------------------------------------------------------------------------------------------------------
+create function public.final_submit(p_team_id uuid, p_member_id uuid, p_confirm boolean, p_idem_key uuid) returns jsonb
+language plpgsql security definer
+set search_path = pg_catalog, public, extensions, app, pg_temp
+as $$
+declare
+  v_team    teams%rowtype;
+  v_fp      text := 'member:' || coalesce(p_member_id::text, '');
+  v_replay  jsonb;
+  v_now     timestamptz;
+  v_pending int;
+  v_active  int;
+  v_resp    jsonb;
+begin
+  perform app.assert_member(p_team_id, p_member_id);
+  if p_idem_key is null then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('idempotencyKey')));
+  end if;
+  if p_confirm is distinct from true then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('confirm')));
+  end if;
+
+  v_team := app.lock_team(p_team_id);
+  v_replay := app.idem_lookup(p_team_id, p_idem_key, 'final_submit', v_fp);
+  if v_replay is not null then
+    return v_replay || '{"replayed": true}'::jsonb;
+  end if;
+
+  perform app.assert_playable(v_team);
+  perform app.settle_questions(p_team_id);
+
+  v_now := app.now();
+  select count(*) filter (where state = 'PENDING_APPROVAL'), count(*) filter (where state = 'ACTIVE')
+    into v_pending, v_active
+    from team_questions where team_id = p_team_id;
+
+  update teams
+     set status = 'FINAL_SUBMITTED', ended_at = v_now, final_submitted_at = v_now, final_submitted_by = p_member_id,
+         state_version = state_version + 1
+   where id = p_team_id;
+
+  insert into audit_events (occurred_at, actor_kind, member_id, team_id, event_type, entity_type, entity_id, payload, request_id)
+  values (v_now, 'MEMBER', p_member_id, p_team_id, 'TEAM_FINAL_SUBMITTED', 'TEAM', p_team_id::text,
+          jsonb_build_object('submitted_at', app.epoch_ms(v_now), 'pending_submissions', v_pending,
+                             'active_questions', v_active, 'coins', v_team.coins,
+                             'remaining_seconds', greatest(0, floor(extract(epoch from (v_team.ends_at - v_now))))::int),
+          p_idem_key);
+
+  v_resp := jsonb_build_object('replayed', false, 'state', app.team_state_json(p_team_id, p_member_id));
+  perform app.idem_store(p_team_id, p_idem_key, 'final_submit', v_fp, v_resp);
+  return v_resp;
+end $$;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- disapprove_submission — re-declared with ONE change (see the header): a frozen team's returned question gets
+-- `question clock + frozen remaining` instead of `now + frozen remaining`.
+-- ---------------------------------------------------------------------------------------------------------------
+create or replace function public.disapprove_submission(p_staff_id uuid, p_submission_id uuid, p_note text, p_idem_key uuid) returns jsonb
+language plpgsql security definer
+set search_path = pg_catalog, public, extensions, app, pg_temp
+as $$
+declare
+  v_team_id uuid;
+  v_team    teams%rowtype;
+  v_sub     submissions%rowtype;
+  v_tq      team_questions%rowtype;
+  v_note    text := nullif(btrim(coalesce(p_note, '')), '');
+  v_fp      text := 'submission:' || coalesce(p_submission_id::text, '') || '|note:' || md5(coalesce(v_note, ''));
+  v_replay  jsonb;
+  v_comp    competition%rowtype;
+  v_now     timestamptz;
+  v_resp    jsonb;
+begin
+  if p_staff_id is null or not exists (select 1 from staff_users where id = p_staff_id and is_active) then
+    perform app.fail('FORBIDDEN');
+  end if;
+  if p_idem_key is null then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('idempotencyKey')));
+  end if;
+  if v_note is not null and length(v_note) > 500 then
+    perform app.fail('VALIDATION_FAILED', jsonb_build_object('fields', jsonb_build_array('note')));
+  end if;
+  select team_id into v_team_id from submissions where id = p_submission_id;
+  if not found then
+    perform app.fail('NOT_FOUND');
+  end if;
+  perform app.require_reviewer(p_staff_id, v_team_id);
+
+  v_team := app.lock_team(v_team_id);
+  v_replay := app.idem_lookup(p_staff_id, p_idem_key, 'disapprove_submission', v_fp);
+  if v_replay is not null then
+    return v_replay || '{"replayed": true}'::jsonb;
+  end if;
+
+  select * into v_comp from competition where id = 1;
+  if v_comp.status = 'PAUSED' then
+    perform app.fail('COMPETITION_PAUSED');
+  elsif v_comp.status <> 'RUNNING' then
+    perform app.fail('COMPETITION_NOT_RUNNING');
+  end if;
+
+  select * into v_sub from submissions where id = p_submission_id for update;
+  if v_sub.status <> 'PENDING' then
+    perform app.fail('SUBMISSION_NOT_PENDING');
+  end if;
+  v_now := app.now();
+  if v_team.status = 'RUNNING' and v_now < v_team.ends_at then
+    perform app.settle_questions(v_team_id);
+  end if;
+
+  select * into v_tq from team_questions where team_id = v_team_id and question_id = v_sub.question_id for update;
+  if not found or v_tq.state <> 'PENDING_APPROVAL' then
+    perform app.fail('SUBMISSION_NOT_PENDING');
+  end if;
+
+  update submissions
+     set status = 'REJECTED', reviewed_by = p_staff_id, reviewed_at = v_now, review_note = v_note
+   where id = p_submission_id;
+  update team_questions
+     set state = 'ACTIVE', timer_deadline = app.question_clock(v_team) + make_interval(secs => v_tq.timer_remaining_seconds),
+         timer_remaining_seconds = null
+   where team_id = v_team_id and question_id = v_sub.question_id;
+
+  update teams set state_version = state_version + 1 where id = v_team_id;
+  insert into audit_events (occurred_at, actor_kind, staff_id, team_id, event_type, entity_type, entity_id, payload, request_id)
+  values (v_now, 'STAFF', p_staff_id, v_team_id, 'SUBMISSION_REJECTED', 'SUBMISSION', p_submission_id::text,
+          jsonb_build_object('question_id', v_sub.question_id, 'has_note', v_note is not null,
+                             'resumed_remaining_seconds', v_tq.timer_remaining_seconds),
+          p_idem_key);
+
+  v_resp := jsonb_build_object('replayed', false,
+                               'submission', jsonb_build_object('id', p_submission_id, 'status', 'REJECTED'));
+  perform app.idem_store(p_staff_id, p_idem_key, 'disapprove_submission', v_fp, v_resp);
+  return v_resp;
+end $$;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- Privileges
+-- ---------------------------------------------------------------------------------------------------------------
+-- (the two re-declared functions are listed too: CREATE OR REPLACE keeps their old privileges, this just states them)
+revoke all on function app.question_json(uuid, smallint)                            from public, anon, authenticated;
+revoke all on function public.buy_hint(uuid, uuid, smallint, smallint, uuid)        from public, anon, authenticated;
+revoke all on function public.buy_time(uuid, uuid, smallint, smallint, int, uuid)   from public, anon, authenticated;
+revoke all on function public.final_submit(uuid, uuid, boolean, uuid)               from public, anon, authenticated;
+revoke all on function public.disapprove_submission(uuid, uuid, text, uuid)         from public, anon, authenticated;
+grant execute on function app.question_json(uuid, smallint)                            to service_role;
+grant execute on function public.buy_hint(uuid, uuid, smallint, smallint, uuid)        to service_role;
+grant execute on function public.buy_time(uuid, uuid, smallint, smallint, int, uuid)   to service_role;
+grant execute on function public.final_submit(uuid, uuid, boolean, uuid)               to service_role;
+grant execute on function public.disapprove_submission(uuid, uuid, text, uuid)         to service_role;

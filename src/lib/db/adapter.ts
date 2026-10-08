@@ -25,7 +25,12 @@ export type DbFunction =
   | "approve_submission"
   | "disapprove_submission"
   | "admin_matrix"
-  | "admin_team_theme";
+  | "admin_team_theme"
+  | "buy_hint"
+  | "buy_time"
+  | "final_submit"
+  | "finalize_team_if_due"
+  | "expire_due_teams";
 
 export interface Db {
   /** Calls one database function and returns its JSON result. Throws `DbError` on any transport/database error. */

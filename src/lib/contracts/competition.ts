@@ -5,11 +5,13 @@
  */
 
 /**
- * Ultimate Team Timer (locked): 2 hours = 7,200 s = 120 min. Server/database-authoritative; starts when the first
- * member actually enters the competition (not at login). Scoring minutes = 120 − floor(remaining_seconds / 60),
- * clamped to 0–120. The database enforces the same value (`competition_ultimate_locked_7200`).
+ * Ultimate Team Timer (locked since Patch B15): 4 hours = 14,400 s = 240 min. Server/database-authoritative; starts when
+ * the first member actually enters the competition (not at login). Each team keeps the allowance it started with
+ * (`teams.timer_seconds`): a team that started under the earlier, shorter rule keeps its original allowance. The database enforces the
+ * competition-wide value (`competition_ultimate_locked_14400`). This constant is a contract mirror used by tests and
+ * tooling; no screen reads it, because every duration shown comes from the server's snapshot.
  */
-export const TEAM_TIMER_SECONDS = 7_200;
+export const TEAM_TIMER_SECONDS = 14_400;
 export const TEAM_TIMER_MINUTES = TEAM_TIMER_SECONDS / 60;
 
 /** Every team starts with 500 Maths Coins (team-wide; the ledger is authoritative). */

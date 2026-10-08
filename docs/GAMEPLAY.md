@@ -7,7 +7,7 @@ Participant gameplay is **server-authoritative**: the database decides every sta
 | Step                      | What happens                                                                                                                                                                                                                                                                  |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Login                     | Creates a session only. It does **not** start the team timer.                                                                                                                                                                                                                 |
-| Enter competition         | The first member to press the button (`POST /api/p/start`, idempotent) starts the team timer: `ends_at = started_at + 7200 s` for everyone. Later entries return the same times.                                                                                              |
+| Enter competition         | The first member to press the button (`POST /api/p/start`, idempotent) starts the team timer: `ends_at = started_at + timer_seconds` for everyone (**B15: 14400 s**; a team that started earlier keeps its 7200 s). Later entries return the same times.                      |
 | Theme unlock              | `POST /api/p/themes/:id/unlock`. **Team-wide**: one `team_themes` row for `team_id + theme_id`; the cost comes from the theme and is charged once. Two members unlocking together give one unlock and one `409 THEME_ALREADY_UNLOCKED`. Q1 becomes `AVAILABLE`, timer `NULL`. |
 | Enter Q1                  | The question page calls `POST /api/p/questions/:id/enter` when it opens (there is no Start button). `AVAILABLE → ACTIVE` once; the deadline is `now + time limit`, and every member, retry and refresh gets the same deadline.                                                |
 | Draft                     | One shared draft per team and question, saved on the server with compare-and-set on `expectedVersion` (`STALE_DRAFT` if a teammate saved first).                                                                                                                              |
@@ -71,6 +71,10 @@ All mutations take the B10 team lock (competition `FOR SHARE`, then the team row
 - Component: `tests/component/home.test.tsx`, `question-page.test.tsx`.
 - E2E: `tests/e2e/gameplay.spec.ts` plays one team with **two separate browser contexts** (entry, timer start, team-wide unlock seen by the second member, Q1 entry and the same deadline, draft surviving a refresh, submit → pending, controlled approval, reward once, Q2 active, the client unable to override the server, no reference answer anywhere). `participant-home.spec.ts` and `question-page.spec.ts` were reworked from the demo values to the server-backed ones. The browser tests use an in-memory stand-in for Supabase (`tests/e2e/support/fake-postgrest.mjs`), whose gameplay rules mirror the SQL; the SQL itself is proven by the database tests above.
 
+## Added by Patch B15
+
+Hints, Buy Time, Final Submit, the 4-hour team timer and the persisted end of a run: see `ECONOMY_AND_FINALIZATION.md`.
+
 ## Not in this patch
 
-The rest of the Admin product (UFM, question keys; the My Teams matrix is Patch B14), hints, Buy Time, the full coin economy, Final Submit, final scoring, UFM, the participant leaderboard, presence, fullscreen enforcement, realtime push and load testing.
+The rest of the Admin product (UFM, question keys; the My Teams matrix is Patch B14), final scoring, UFM, the participant leaderboard, fullscreen enforcement, realtime push and load testing. (Hints, Buy Time and Final Submit arrived in B15.)

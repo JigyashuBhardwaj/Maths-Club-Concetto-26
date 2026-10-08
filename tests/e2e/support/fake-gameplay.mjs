@@ -1,7 +1,8 @@
 // The gameplay functions of migration 14 for the in-memory backend (fake-postgrest.mjs), used ONLY by the Playwright
 // suite: unlock_theme, start_question, get_question_for_team, save_draft, submit_answer, approve_submission,
-// disapprove_submission, start_team_competition and get_team_state, plus the B14 reads admin_matrix and admin_team_theme
-// (migration 15).
+// disapprove_submission, start_team_competition and get_team_state, the B14 reads admin_matrix and admin_team_theme
+// (migration 15), and the B15 operations buy_hint, buy_time, final_submit, finalize_team_if_due and expire_due_teams
+// (migrations 16 and 17).
 //
 // It mirrors the SQL rule for rule (the same gates in the same order, the same error codes and details, the same result
 // shapes, the same idempotency scopes) so the browser tests exercise the real Next.js routes and the real UI against
@@ -16,7 +17,15 @@
 
 import { randomUUID } from "node:crypto";
 
-const DURATION_S = 7200;
+const DURATION_S = 14_400; // what a team starting now is given (competition.ultimate_seconds)
+// B15 fixtures: invented prices and packs. The application reads every one of them from the server; a spec that
+// asserts a number takes it from here.
+export const HINT_COST = { 1: 20, 2: 40 };
+export const TIME_PACKS = [
+  { n: 1, seconds: 120, cost: 20, max: null },
+  { n: 2, seconds: 240, cost: 40, max: null },
+  { n: 3, seconds: 480, cost: 80, max: 2 },
+];
 const THEME_CODES = "ABCDEFGHIJ";
 const DIFFICULTY = [
   "EASY",
@@ -80,6 +89,11 @@ export function createGameplay({
       version: 0,
       startedAt: null,
       endsAt: null,
+      timerSeconds: null, // the per-team allowance snapshot (teams.timer_seconds)
+      endedAt: null,
+      finalSubmittedAt: null,
+      hints: new Set(), // "questionId:tier" the team owns
+      ledger: [], // { type, amount, qid } of the spends this module made
       pausedAt: null,
       themes: new Map(), // themeId -> { by, at, paid }
       questions: new Map(), // questionId -> { state, deadline, remaining, activatedAt, approvedAt, timedOutAt }
@@ -94,6 +108,7 @@ export function createGameplay({
   const teamClock = (t, n) => {
     const g = game(t);
     let ref = n;
+    if (g.endedAt !== null) ref = Math.min(ref, g.endedAt);
     if (t.competition === "PAUSED" && g.pausedAt !== null) ref = Math.min(ref, g.pausedAt);
     return ref;
   };
@@ -143,8 +158,10 @@ export function createGameplay({
     const g = game(t);
     const ref = teamClock(t, n);
     const qref = questionClock(t, n);
+    const duration = g.timerSeconds ?? DURATION_S;
     const remaining =
-      g.endsAt === null ? DURATION_S : Math.max(0, Math.floor((g.endsAt - ref) / 1000));
+      g.endsAt === null ? duration : Math.max(0, Math.floor((g.endsAt - ref) / 1000));
+    const expired = t.status === "RUNNING" && g.endsAt !== null && ref >= g.endsAt;
     return {
       server_now: n,
       state_version: g.version,
@@ -155,11 +172,12 @@ export function createGameplay({
         coins: g.coins,
         started_at: g.startedAt,
         ends_at: g.endsAt,
-        ended_at: null,
-        final_submitted_at: null,
-        duration_seconds: DURATION_S,
+        ended_at: g.endedAt,
+        final_submitted_at: g.finalSubmittedAt,
+        duration_seconds: duration,
         remaining_seconds: remaining,
-        expired: t.status === "RUNNING" && g.endsAt !== null && ref >= g.endsAt,
+        expired,
+        frozen: ["FINAL_SUBMITTED", "ENDED", "DISQUALIFIED"].includes(t.status) || expired,
       },
       themes: THEMES.map((th) => {
         const unlocked = g.themes.has(th.id);
@@ -208,6 +226,10 @@ export function createGameplay({
     };
   }
 
+  const hintBody = (qq, tier) =>
+    `Hint ${tier} for ${THEMES[qq.themeId - 1].code}${qq.ordinal}: look again.`;
+  const optionId = (qid, n) => (qid - 1) * 3 + n;
+
   const slotOf = (t, memberId) => t.members.find((x) => x.id === memberId)?.slot ?? null;
 
   function questionJson(t, qid, n) {
@@ -226,6 +248,38 @@ export function createGameplay({
       state,
       reward_coins: qq.reward,
       time_limit_seconds: qq.timeLimit,
+    };
+    const canSpend = t.competition === "RUNNING" && t.status === "RUNNING" && n < g.endsAt;
+    const owns = (tier) => g.hints.has(`${qq.id}:${tier}`);
+    out.hints = [1, 2].map((tier) => ({
+      tier,
+      cost: HINT_COST[tier],
+      owned: owns(tier),
+      purchasable:
+        canSpend &&
+        ["ACTIVE", "PENDING_APPROVAL", "APPROVED"].includes(state) &&
+        !owns(tier) &&
+        (tier === 1 || owns(1)),
+      ...(owns(tier) ? { body_md: hintBody(qq, tier) } : {}),
+    }));
+    out.buy_time = {
+      purchase_count: row.timeCount ?? 0,
+      extra_seconds: row.extra ?? 0,
+      can_buy: canSpend && state === "ACTIVE",
+      options:
+        state === "ACTIVE"
+          ? TIME_PACKS.map((p) => {
+              const used = row.bought?.get(p.n) ?? 0;
+              return {
+                id: optionId(qq.id, p.n),
+                seconds: p.seconds,
+                cost: p.cost,
+                max_purchases: p.max,
+                purchased: used,
+                remaining_purchases: p.max === null ? null : Math.max(p.max - used, 0),
+              };
+            })
+          : [],
     };
     if (state === "AVAILABLE") return out; // metadata only: the body is withheld until the team enters
     out.body_md = qq.body;
@@ -266,6 +320,25 @@ export function createGameplay({
     return out;
   }
 
+  /** finalize_team_if_due / expire_due_teams: RUNNING -> ENDED at the team's own end, only while the competition runs. */
+  function finalizeIfDue(t, n) {
+    const g = game(t);
+    if (t.competition !== "RUNNING" || t.status !== "RUNNING" || g.endsAt === null || n < g.endsAt)
+      return false;
+    for (const q of g.questions.values()) {
+      if (q.state === "ACTIVE" && q.deadline <= g.endsAt) {
+        q.state = "TIMED_OUT";
+        q.timedOutAt = q.deadline;
+        q.deadline = null;
+      }
+    }
+    t.status = "ENDED";
+    g.endedAt = g.endsAt;
+    bump(g);
+    audit.push({ type: "TEAM_ENDED", teamId: t.id });
+    return true;
+  }
+
   const fp = (...parts) => parts.join("|");
   const needKey = (k) => {
     if (typeof k !== "string" || k === "")
@@ -288,6 +361,7 @@ export function createGameplay({
       if (t.status === "NOT_STARTED") {
         t.status = "RUNNING";
         g.startedAt = n;
+        g.timerSeconds = DURATION_S;
         g.endsAt = n + DURATION_S * 1000;
         bump(g);
         started = true;
@@ -328,6 +402,9 @@ export function createGameplay({
           activatedAt: null,
           approvedAt: null,
           timedOutAt: null,
+          timeCount: 0,
+          extra: 0,
+          bought: new Map(), // pack number -> purchases
         });
       }
       bump(g);
@@ -480,6 +557,154 @@ export function createGameplay({
       const res = { replayed: false, question: questionJson(t, qq.id, n) };
       idemStore(t.id, a.p_idem_key, "submit_answer", f, res);
       return res;
+    },
+
+    buy_hint(a) {
+      const { t, m } = assertMember(a.p_team_id, a.p_member_id);
+      needKey(a.p_idem_key);
+      if (!Number.isInteger(a.p_question_id) || ![1, 2].includes(a.p_tier))
+        throw fail("VALIDATION_FAILED", { fields: ["tier"] });
+      const f = fp("question", a.p_question_id, "tier", a.p_tier, "member", m.id);
+      const replay = idemLookup(t.id, a.p_idem_key, "buy_hint", f);
+      if (replay) return { ...replay, replayed: true };
+      const n = now();
+      assertPlayable(t, n);
+      const g = game(t);
+      const qq = QUESTIONS.find((x) => x.id === a.p_question_id);
+      if (!qq) throw fail("NOT_FOUND");
+      const row = g.questions.get(qq.id);
+      if (!row) throw fail("THEME_LOCKED");
+      const st = effState(t, row, n);
+      if (st === "TIMED_OUT") throw fail("QUESTION_TIMED_OUT");
+      if (!["ACTIVE", "PENDING_APPROVAL", "APPROVED"].includes(st))
+        throw fail("QUESTION_NOT_ACTIVE");
+      const key = `${qq.id}:${a.p_tier}`;
+      const owned = g.hints.has(key);
+      if (!owned) {
+        if (a.p_tier === 2 && !g.hints.has(`${qq.id}:1`)) throw fail("HINT_TIER1_REQUIRED");
+        const cost = HINT_COST[a.p_tier];
+        if (g.coins < cost) throw fail("INSUFFICIENT_COINS", { have: g.coins, need: cost });
+        settle(t, n);
+        g.coins -= cost;
+        g.hints.add(key);
+        g.ledger.push({ type: "HINT_PURCHASE", amount: -cost, qid: qq.id });
+        bump(g);
+        audit.push({ type: "HINT_PURCHASED", teamId: t.id, entityId: key });
+      } else settle(t, n);
+      const res = {
+        replayed: false,
+        already_owned: owned,
+        tier: a.p_tier,
+        hint: { tier: a.p_tier, body_md: hintBody(qq, a.p_tier) },
+        question: questionJson(t, qq.id, n),
+        state: teamState(t, m, n),
+      };
+      idemStore(t.id, a.p_idem_key, "buy_hint", f, res);
+      return res;
+    },
+
+    buy_time(a) {
+      const { t, m } = assertMember(a.p_team_id, a.p_member_id);
+      needKey(a.p_idem_key);
+      if (
+        !Number.isInteger(a.p_question_id) ||
+        !Number.isInteger(a.p_option_id) ||
+        !Number.isInteger(a.p_expected_count) ||
+        a.p_expected_count < 0
+      )
+        throw fail("VALIDATION_FAILED", { fields: ["optionId", "expectedPurchaseCount"] });
+      const f = fp(
+        "question",
+        a.p_question_id,
+        "option",
+        a.p_option_id,
+        "expected",
+        a.p_expected_count,
+        "member",
+        m.id,
+      );
+      const replay = idemLookup(t.id, a.p_idem_key, "buy_time", f);
+      if (replay) return { ...replay, replayed: true };
+      const n = now();
+      assertPlayable(t, n);
+      const g = game(t);
+      const qq = QUESTIONS.find((x) => x.id === a.p_question_id);
+      if (!qq) throw fail("NOT_FOUND");
+      const row = g.questions.get(qq.id);
+      if (!row) throw fail("THEME_LOCKED");
+      const st = effState(t, row, n);
+      if (st === "TIMED_OUT") throw fail("QUESTION_TIMED_OUT");
+      if (st !== "ACTIVE") throw fail("QUESTION_NOT_ACTIVE");
+      if (row.timeCount !== a.p_expected_count)
+        throw fail("STALE_PURCHASE_COUNT", { count: row.timeCount });
+      const pack = TIME_PACKS.find((p) => optionId(qq.id, p.n) === a.p_option_id);
+      if (!pack) throw fail("NOT_FOUND");
+      const used = row.bought.get(pack.n) ?? 0;
+      if (pack.max !== null && used >= pack.max) throw fail("TIME_PURCHASE_LIMIT");
+      if (g.coins < pack.cost) throw fail("INSUFFICIENT_COINS", { have: g.coins, need: pack.cost });
+      settle(t, n);
+      g.coins -= pack.cost;
+      g.ledger.push({ type: "TIME_PURCHASE", amount: -pack.cost, qid: qq.id });
+      row.deadline += pack.seconds * 1000; // the question's deadline only: g.endsAt is never written
+      row.extra += pack.seconds;
+      row.timeCount += 1;
+      row.bought.set(pack.n, used + 1);
+      bump(g);
+      audit.push({ type: "TIME_PURCHASED", teamId: t.id, entityId: String(qq.id) });
+      const res = {
+        replayed: false,
+        purchase: {
+          seq: row.timeCount,
+          option_id: a.p_option_id,
+          seconds: pack.seconds,
+          cost: pack.cost,
+        },
+        question: questionJson(t, qq.id, n),
+        state: teamState(t, m, n),
+      };
+      idemStore(t.id, a.p_idem_key, "buy_time", f, res);
+      return res;
+    },
+
+    final_submit(a) {
+      const { t, m } = assertMember(a.p_team_id, a.p_member_id);
+      needKey(a.p_idem_key);
+      if (a.p_confirm !== true) throw fail("VALIDATION_FAILED", { fields: ["confirm"] });
+      const f = fp("member", m.id);
+      const replay = idemLookup(t.id, a.p_idem_key, "final_submit", f);
+      if (replay) return { ...replay, replayed: true };
+      const n = now();
+      assertPlayable(t, n);
+      settle(t, n);
+      const g = game(t);
+      t.status = "FINAL_SUBMITTED";
+      g.endedAt = n;
+      g.finalSubmittedAt = n;
+      bump(g);
+      audit.push({ type: "TEAM_FINAL_SUBMITTED", teamId: t.id, memberId: m.id });
+      const res = { replayed: false, state: teamState(t, m, n) };
+      idemStore(t.id, a.p_idem_key, "final_submit", f, res);
+      return res;
+    },
+
+    finalize_team_if_due(a) {
+      const t = teamById(a.p_team_id);
+      if (!t) throw fail("NOT_FOUND");
+      return finalizeIfDue(t, now())
+        ? { finalized: true, status: "ENDED" }
+        : { finalized: false, status: t.status };
+    },
+
+    expire_due_teams(a) {
+      const limit = a.p_limit ?? 200;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+        throw fail("VALIDATION_FAILED", { fields: ["limit"] });
+      const n = now();
+      const due = teamList()
+        .filter((t) => t.status === "RUNNING" && game(t).endsAt !== null && game(t).endsAt <= n)
+        .sort((x, y) => game(x).endsAt - game(y).endsAt)
+        .slice(0, limit);
+      return due.filter((t) => finalizeIfDue(t, n)).length;
     },
 
     approve_submission(a) {
@@ -651,7 +876,8 @@ export function createGameplay({
       sub.status = "REJECTED";
       sub.note = note;
       row.state = "ACTIVE";
-      row.deadline = n + row.remaining * 1000;
+      // the question clock (not "now"): a frozen team's returned question must not show more time than it had
+      row.deadline = questionClock(owner, n) + row.remaining * 1000;
       row.remaining = null;
       audit.push({ type: "SUBMISSION_REJECTED", teamId: owner.id, entityId: sub.id });
       res = { replayed: false, submission: { id: sub.id, status: "REJECTED" } };
@@ -693,6 +919,35 @@ export function createGameplay({
       t.competition = status;
       return { ok: true };
     },
+    /**
+     * Test-only: lets `ms` of time pass for ONE team without moving the shared clock (which would also age every other
+     * team of the parallel specs): its start and end move that much into the past, and so do its running question deadlines unless `questions` is false.
+     */
+    ageTeam({ loginId, ms, questions = true }) {
+      const t = teams.get(String(loginId).toLowerCase());
+      if (!t) throw new AppError("unknown team");
+      const g = game(t);
+      if (g.startedAt === null) throw new AppError("team not started");
+      g.startedAt -= Number(ms);
+      g.endsAt -= Number(ms);
+      if (questions) {
+        for (const q of g.questions.values()) {
+          if (q.state === "ACTIVE") q.deadline -= Number(ms);
+        }
+      }
+      return { endsAt: g.endsAt };
+    },
+    /** Test-only: gives a started team the allowance a pre-B15 team was given (seconds), keeping `started_at`. */
+    legacyTimer({ loginId, seconds }) {
+      const t = teams.get(String(loginId).toLowerCase());
+      if (!t) throw new AppError("unknown team");
+      const g = game(t);
+      if (g.startedAt === null) throw new AppError("team not started");
+      g.timerSeconds = Number(seconds);
+      g.endsAt = g.startedAt + Number(seconds) * 1000;
+      bump(g);
+      return { endsAt: g.endsAt };
+    },
     /** What the database holds for one team (so a test can prove "exactly once"): never reaches the app. */
     inspect({ loginId }) {
       const t = teams.get(String(loginId).toLowerCase());
@@ -704,11 +959,22 @@ export function createGameplay({
         status: t.status,
         startedAt: g.startedAt,
         endsAt: g.endsAt,
+        endedAt: g.endedAt,
+        finalSubmittedAt: g.finalSubmittedAt,
+        timerSeconds: g.timerSeconds,
+        hints: [...g.hints],
+        ledger: g.ledger,
         themes: [...g.themes.keys()],
         questions: Object.fromEntries(
           [...g.questions].map(([id, q]) => [
             id,
-            { state: q.state, deadline: q.deadline, remaining: q.remaining },
+            {
+              state: q.state,
+              deadline: q.deadline,
+              remaining: q.remaining,
+              timeCount: q.timeCount ?? 0,
+              extra: q.extra ?? 0,
+            },
           ]),
         ),
         submissions: g.submissions.map((s) => ({

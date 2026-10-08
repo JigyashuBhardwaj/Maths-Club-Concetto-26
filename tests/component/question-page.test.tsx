@@ -79,7 +79,7 @@ describe("opening a question", () => {
     expect(c.enterQuestionCall).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { level: 1, name: "THEME A" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Team timer" })).toHaveTextContent(
-      /01:(58:5\d|59:\d\d)/,
+      /03:(58:5\d|59:\d\d)/,
     );
     expect(screen.getByRole("group", { name: "Question timer" })).toHaveTextContent(
       /0[23]:[0-5]\d/,
@@ -88,12 +88,12 @@ describe("opening a question", () => {
     expect(screen.getByRole("group", { name: /Reward/ })).toHaveTextContent("50 coins++");
   });
 
-  it("hints and Buy Time are present but disabled (a later patch)", async () => {
+  it("Buy Time and Hint 1 are available on an ACTIVE question; Hint 2 waits for Hint 1 (details: economy.test.tsx)", async () => {
     c.fetchQuestion.mockResolvedValue(c.ok(question()));
     mount(states("ACTIVE", "LOCKED", "LOCKED", "LOCKED", "LOCKED"));
     await screen.findByText("Find the value of x.");
-    expect(screen.getByRole("button", { name: "buy time" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /^Hint 1/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "buy time" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Hint 1/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /^Hint 2/ })).toBeDisabled();
   });
 

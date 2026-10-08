@@ -91,7 +91,7 @@ While `PAUSED`: all participant mutations return `COMPETITION_PAUSED`; admin rev
 
 | From | Event | Actor | Guard | Effects |
 |------|-------|-------|-------|---------|
-| NOT_STARTED | `start_team_competition` | the first member to **enter the competition interface**: the client calls it only after the member has acknowledged the rules and completed the fullscreen acknowledgement. Login never calls it | competition `RUNNING` | `status='RUNNING'`, `started_at=now`, `ends_at=now+7200s`; coins already 500 from creation; audit `TEAM_STARTED`. Exactly-once: guarded by the status check under the team lock, so two members entering together start the clock once; later members, re-logins and re-entering fullscreen never restart it. |
+| NOT_STARTED | `start_team_competition` | the first member to **enter the competition interface**: the client calls it only after the member has acknowledged the rules and completed the fullscreen acknowledgement. Login never calls it | competition `RUNNING` | `status='RUNNING'`, `started_at=now`, `timer_seconds=competition.ultimate_seconds` (**B15: 14400**; 7200 before), `ends_at=now+timer_seconds`; coins already 500 from creation; audit `TEAM_STARTED`. Exactly-once: guarded by the status check under the team lock, so two members entering together start the clock once; later members, re-logins and re-entering fullscreen never restart it. |
 | RUNNING | `final_submit` | any member | none pending-blocking (see `DEC-03`) | §5.8 |
 | RUNNING | auto-end | system (lazy or sweeper) | `now >= ends_at` | §5.4 |
 | RUNNING | `disqualify_team` | assigned admin / super admin | two-step confirmation | `status='DISQUALIFIED'`, `ended_at=now`, `score_override=-1201`. The team is frozen and every later mutation is rejected. |
@@ -152,7 +152,7 @@ This is the *Enter competition* action. The participant UI calls it only at the 
 2. Set `status='RUNNING'`, `started_at = app.now()`, `ends_at = started_at + ultimate_seconds`.
 3. Audit `TEAM_STARTED`. Ping `team:{id}`.
 
-**B10:** `started_at = app.now()` and `ends_at = started_at + ultimate_seconds` (7200, locked by a check constraint) are written by one `UPDATE` under the team lock, so concurrent members observe a single pair of timestamps; `state_version` is bumped once. The competition must be `RUNNING` (`PAUSED` → `COMPETITION_PAUSED`: a team cannot be started during a pause, because every clock is frozen at `paused_at`, before the team would start). A team that is **already `RUNNING`** returns its existing state and times untouched — no reset, no audit, no version bump — whatever the competition status, since nothing is mutated. FINAL_SUBMITTED → `ALREADY_SUBMITTED`; ENDED/DISQUALIFIED → `TEAM_ENDED`.
+**B10 (amended by B15):** `started_at = app.now()`, `timer_seconds = ultimate_seconds` (14400 since B15, locked by a check constraint; teams started before B15 keep 7200) and `ends_at = started_at + timer_seconds` are written by one `UPDATE` under the team lock, so concurrent members observe a single pair of timestamps; `state_version` is bumped once. The competition must be `RUNNING` (`PAUSED` → `COMPETITION_PAUSED`: a team cannot be started during a pause, because every clock is frozen at `paused_at`, before the team would start). A team that is **already `RUNNING`** returns its existing state and times untouched — no reset, no audit, no version bump — whatever the competition status, since nothing is mutated. FINAL_SUBMITTED → `ALREADY_SUBMITTED`; ENDED/DISQUALIFIED → `TEAM_ENDED`.
 
 ### 5.2 `unlockTheme` (`unlock_theme`)
 1. Preamble. Verify the theme exists and has no `team_themes` row (else `THEME_ALREADY_UNLOCKED`, and **no charge**).
@@ -184,7 +184,7 @@ Not on the brief's list; added by the locked rule that a question timer starts w
 4. Cache `final_*` via `compute_team_score`. Member sessions are **not** revoked: students stay logged in to see their result and log out themselves (brief §18).
 5. Audit `TEAM_ENDED(reason=TIMER)`; ping `team:{id}` and `admin:{admin_id}`.
 
-The sweeper (`pg_cron`, every 30 s) runs `expire_due_teams()` which calls `expire_team` for every `RUNNING` team with `ends_at <= now`, using `FOR UPDATE SKIP LOCKED` so it never queues behind live traffic.
+The sweeper runs `expire_due_teams()` which calls `expire_team` for every `RUNNING` team with `ends_at <= now`, using `FOR UPDATE SKIP LOCKED` so it never queues behind live traffic. **B15:** it is invoked by a Vercel Cron route (`GET /api/cron/expire-teams`), not by `pg_cron`, and only as a safety net: `finalize_team_if_due` runs lazily on every read and after every refused action, which is the primary path. `ended_at` is the team's `ends_at` either way.
 
 ### 5.5 `buyTime` (`buy_time`)
 Request carries the chosen `option_id` (one of the question's `question_buy_time_options`) and `expected_purchase_count` (the `time_purchase_count` the client saw).

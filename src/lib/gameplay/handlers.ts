@@ -21,7 +21,13 @@ import {
   themeIdParamSchema,
   unlockResultSchema,
 } from "@/lib/contracts/gameplay";
-import { callDb, parseResult, readIdempotencyKey, requireEmptyBody } from "@/lib/runtime/handlers";
+import {
+  callDb,
+  callParticipantDb,
+  parseResult,
+  readIdempotencyKey,
+  requireEmptyBody,
+} from "@/lib/runtime/handlers";
 
 /**
  * Handlers of the participant gameplay engine (docs/API_SPEC.md §4, §6; Patch B13). Same dependency bundle and the same
@@ -75,7 +81,7 @@ export function createGetQuestionHandler(deps: GameplayDeps) {
         const questionId = parseSelector(questionIdParamSchema, (await ctx.params).questionId);
         const result = parseResult(
           questionResultSchema,
-          await callDb(db, "get_question_for_team", {
+          await callParticipantDb(db, principal.team.id, "get_question_for_team", {
             p_team_id: principal.team.id,
             p_member_id: principal.member.id,
             p_question_id: questionId,
@@ -106,7 +112,7 @@ export function createEnterQuestionHandler(deps: GameplayDeps) {
         await requireEmptyBody(request);
         const { replayed, ...data } = parseResult(
           enterResultSchema,
-          await callDb(db, "start_question", {
+          await callParticipantDb(db, principal.team.id, "start_question", {
             p_team_id: principal.team.id,
             p_member_id: principal.member.id,
             p_question_id: questionId,
@@ -136,7 +142,7 @@ export function createUnlockThemeHandler(deps: GameplayDeps) {
         await requireEmptyBody(request);
         const result = parseResult(
           unlockResultSchema,
-          await callDb(db, "unlock_theme", {
+          await callParticipantDb(db, principal.team.id, "unlock_theme", {
             p_team_id: principal.team.id,
             p_member_id: principal.member.id,
             p_theme_id: themeId,
@@ -168,7 +174,7 @@ export function createSaveDraftHandler(deps: GameplayDeps) {
         const input = await readJson(request, saveDraftSchema, MAX_ANSWER_BODY_BYTES);
         const data = parseResult(
           draftResultSchema,
-          await callDb(db, "save_draft", {
+          await callParticipantDb(db, principal.team.id, "save_draft", {
             p_team_id: principal.team.id,
             p_member_id: principal.member.id,
             p_question_id: questionId,
@@ -200,7 +206,7 @@ export function createSubmitAnswerHandler(deps: GameplayDeps) {
         const input = await readJson(request, submitAnswerSchema, MAX_ANSWER_BODY_BYTES);
         const { replayed, ...data } = parseResult(
           submitResultSchema,
-          await callDb(db, "submit_answer", {
+          await callParticipantDb(db, principal.team.id, "submit_answer", {
             p_team_id: principal.team.id,
             p_member_id: principal.member.id,
             p_question_id: questionId,

@@ -59,6 +59,11 @@ export const teamStateSchema = z
       duration_seconds: z.number().int().positive(),
       remaining_seconds: z.number().int().nonnegative(),
       expired: z.boolean(),
+      /**
+       * True once the team can no longer play: FINAL_SUBMITTED / ENDED / DISQUALIFIED, or its timer reached zero
+       * (even if the database has not yet persisted the ENDED status). The clients freeze on this flag.
+       */
+      frozen: z.boolean(),
     }),
     themes: z.array(
       z.object({

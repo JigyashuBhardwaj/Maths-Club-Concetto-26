@@ -3,10 +3,12 @@
 -- Seeds ONLY: the competition configuration, 10 themes (A–J), 5 questions per theme (50), 2 hints per question
 -- (100) and placeholder reviewer keys. All text is clearly marked DEV PLACEHOLDER. The real competition content
 -- replaces it later; the structure (and the assertions at the bottom) stay.
--- Prices/rewards are placeholder CONTENT DATA (unlock 100, reward 50, hints 40/80, buy-time options 120 s/20, 240 s/40, 480 s/80).
+-- Prices/rewards are placeholder CONTENT DATA (unlock 100, reward 50, hints 20/40, buy-time options 120 s/20, 240 s/40, 480 s/80).
+-- B15: the hint prices changed from 40/80 to 20/40. This file only seeds a development/CI database; it never updates an existing
+-- one (every insert is ON CONFLICT DO NOTHING). Production hint prices are changed by a separate, human-run, reviewed script.
 -- Staff accounts and teams are never seeded here: the Super Admin is provisioned out of band (no fake credentials).
 
-insert into competition (id) values (1) on conflict (id) do nothing;   -- defaults: SETUP, 7200 s, 500 coins, -1200 / -1201
+insert into competition (id) values (1) on conflict (id) do nothing;   -- defaults: SETUP, 14400 s, 500 coins, -1200 / -1201
 
 insert into themes (id, code, name, description, topics, difficulty, unlock_cost, display_order)
 select n, chr(64 + n), 'Theme ' || chr(64 + n) || ' [DEV PLACEHOLDER]',
@@ -41,7 +43,7 @@ on conflict (question_id) do nothing;
 insert into hints (id, question_id, tier, body_md, cost)
 select (q.id - 1) * 2 + tier, q.id, tier,
        '[DEV PLACEHOLDER] Hint ' || tier || ' for question ' || q.id || '.',
-       case tier when 1 then 40 else 80 end
+       case tier when 1 then 20 else 40 end
 from questions q cross join generate_series(1, 2) as tier
 on conflict (id) do nothing;
 

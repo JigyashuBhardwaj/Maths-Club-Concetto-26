@@ -63,6 +63,9 @@ describe("error codes", () => {
       SUBMISSION_PENDING: 409,
       SUBMISSION_NOT_PENDING: 409,
       STALE_DRAFT: 409,
+      HINT_TIER1_REQUIRED: 409,
+      STALE_PURCHASE_COUNT: 409,
+      TIME_PURCHASE_LIMIT: 409,
       SERVICE_UNAVAILABLE: 503,
     });
   });

@@ -19,6 +19,7 @@
 | `docs/TEST_PLAN.md` | Test matrix, concurrency tests, load tests |
 | `docs/DEPLOYMENT.md` | Environments, env vars, runbook, freeze checklist |
 | `docs/REQUIREMENTS.md` | Brief → design traceability |
+| `docs/ECONOMY_AND_FINALIZATION.md` | Hints, Buy Time, Final Submit, the 4 h timer and how a team's end is persisted (Patch B15) |
 
 Stopped for human review, as the brief requires.
 

@@ -352,10 +352,10 @@ for (const t of [3, 4, 5, 6, 7, 8]) await must(`select ${unlock(t, 1, 1, 300 + t
 {
   assert.equal(
     await one(
-      `select (ends_at - started_at = interval '7200 seconds')::text from teams where id = '${team(3)}'`,
+      `select (ends_at - started_at = interval '14400 seconds')::text from teams where id = '${team(3)}'`,
     ),
     "true",
-    "the team timer is 7200 s from the first valid member, whatever the questions did",
+    "the team timer is 14400 s from the first valid member, whatever the questions did",
   );
   assert.equal(
     await one(

@@ -35,11 +35,12 @@ test.describe("question page", () => {
     await expect(page.getByRole("heading", { level: 1, name: "THEME A" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Team timer" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Question timer" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "buy time" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "buy time" })).toBeEnabled();
     // 500 starting coins less the 100 the team paid for the theme, both from the server
     await expect(page.getByRole("group", { name: "Coins left" })).toContainText("400");
     await expect(page.getByRole("group", { name: /Reward/ })).toContainText("50 coins++");
-    await expect(page.getByRole("button", { name: /^Hint 1/ })).toBeDisabled();
+    // B15: Hint 1 can be bought on an active question; Hint 2 only after Hint 1
+    await expect(page.getByRole("button", { name: /^Hint 1/ })).toBeEnabled();
     await expect(page.getByRole("button", { name: /^Hint 2/ })).toBeDisabled();
     // entering Q1 started its timer on the server: there is nothing to press
     await expect(page.getByRole("button", { name: /start/i })).toHaveCount(0);
@@ -175,13 +176,15 @@ test.describe("question page", () => {
     await expect(page.getByRole("button", { name: "Submit" })).toBeEnabled();
   });
 
-  test("hints and buy time are shown but not available yet", async ({ page }) => {
-    // They arrive in a later patch (B14/B15): the server has no such function, so the buttons are disabled.
+  test("hints and buy time are live: prices come from the server, Hint 2 waits for Hint 1", async ({
+    page,
+  }) => {
     await startTheme(page);
-    for (const name of [/^Hint 1/, /^Hint 2/, "buy time"]) {
-      await expect(page.getByRole("button", { name })).toBeDisabled();
-    }
-    await expect(page.getByRole("button", { name: /^Hint 1/ })).toContainText("coming soon");
+    await expect(page.getByRole("button", { name: /^Hint 1/ })).toBeEnabled();
+    await expect(page.getByRole("button", { name: /^Hint 1/ })).toContainText("20 coins");
+    await expect(page.getByRole("button", { name: /^Hint 2/ })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /^Hint 2/ })).toContainText("after Hint 1");
+    await expect(page.getByRole("button", { name: "buy time" })).toBeEnabled();
   });
 
   test("direct visits to a locked theme or question show a notice", async ({ page }) => {

@@ -38,20 +38,23 @@ function walk(dir: string, out: string[] = []): string[] {
 
 describe("migrations", () => {
   it("are ordered, uniquely numbered and complete", () => {
-    expect(migrationNames).toHaveLength(15);
+    expect(migrationNames).toHaveLength(17);
     for (const f of migrationNames) expect(f).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
     expect(new Set(migrationNames.map((f) => f.slice(0, 14))).size).toBe(migrationNames.length);
     expect(migrationNames[0]).toContain("extensions_enums_clock");
-    expect(migrationNames.at(-7)).toContain("security_rls");
-    expect(migrationNames.at(-6)).toContain("buy_time_options");
-    expect(migrationNames.at(-5)).toContain("auth_functions");
-    expect(migrationNames.at(-4)).toContain("runtime_engine");
-    expect(migrationNames.at(-3)).toContain("provisioning");
-    expect(migrationNames.at(-2)).toContain("gameplay_engine");
-    expect(migrationNames.at(-1)).toContain("admin_matrix");
+    expect(migrationNames.at(-9)).toContain("security_rls");
+    expect(migrationNames.at(-8)).toContain("buy_time_options");
+    expect(migrationNames.at(-7)).toContain("auth_functions");
+    expect(migrationNames.at(-6)).toContain("runtime_engine");
+    expect(migrationNames.at(-5)).toContain("provisioning");
+    expect(migrationNames.at(-4)).toContain("gameplay_engine");
+    expect(migrationNames.at(-3)).toContain("admin_matrix");
+    expect(migrationNames.at(-2)).toContain("timer_14400_and_finalization");
+    expect(migrationNames.at(-1)).toContain("economy_and_final_submit");
   });
 
-  // B9 (auth_functions), B10 (runtime_engine), B12 (provisioning), B13 (gameplay_engine) and B14 (admin_matrix): each function is explicitly revoked from PUBLIC and granted to
+  // B9 (auth_functions), B10 (runtime_engine), B12 (provisioning), B13 (gameplay_engine), B14 (admin_matrix) and B15
+  // (timer_14400_and_finalization, economy_and_final_submit): each function is explicitly revoked from PUBLIC and granted to
   // service_role only, and every SECURITY DEFINER function pins its search_path.
   for (const [suffix, minFunctions, minDefiners] of [
     ["auth_functions", 11, 3],
@@ -59,6 +62,8 @@ describe("migrations", () => {
     ["provisioning", 4, 3],
     ["gameplay_engine", 12, 3],
     ["admin_matrix", 4, 2],
+    ["timer_14400_and_finalization", 4, 3],
+    ["economy_and_final_submit", 5, 4],
   ] as const) {
     it(`restrict every ${suffix} function explicitly: revoke from PUBLIC/anon/authenticated, grant to service_role`, () => {
       const file = migrationNames.find((f) => f.includes(suffix)) ?? "";
@@ -115,16 +120,26 @@ describe("the database agrees with the TypeScript contract", () => {
     expect(migrations).toContain(`id = (theme_id - 1) * ${QUESTIONS_PER_THEME} + ordinal`);
   });
 
-  it("Ultimate Team Timer is 7200 s / 120 min (never 14400 s / 240 min)", () => {
-    expect(TEAM_TIMER_SECONDS).toBe(7200);
-    expect(TEAM_TIMER_MINUTES).toBe(120);
-    expect(migrations).toContain(
-      `ultimate_seconds            int  not null default ${TEAM_TIMER_SECONDS}`,
+  it("Ultimate Team Timer is 14400 s / 240 min from B15; teams that started earlier keep 7200 s", () => {
+    expect(TEAM_TIMER_SECONDS).toBe(14400);
+    expect(TEAM_TIMER_MINUTES).toBe(240);
+    // The migrations are append-only: B1 created the 7200 default and B15 (migration 16) moves it forward.
+    const b15 = read(`supabase/migrations/${migrationNames.at(-2)}`);
+    expect(b15).toContain(
+      `alter table competition alter column ultimate_seconds set default ${TEAM_TIMER_SECONDS};`,
     );
-    expect(migrations).toContain(`check (ultimate_seconds = ${TEAM_TIMER_SECONDS})`);
-    expect(migrations).toContain(
-      "check (final_minutes_taken is null or final_minutes_taken between 0 and 120)",
+    expect(b15).toContain(`check (ultimate_seconds = ${TEAM_TIMER_SECONDS})`);
+    expect(b15).toContain("drop constraint competition_ultimate_locked_7200");
+    // started teams are backfilled with the allowance they were actually given, and ONLY started teams
+    expect(b15).toContain("update teams set timer_seconds = 7200 where started_at is not null;");
+    expect(b15).toContain(
+      "check ((timer_seconds is not null) = (started_at is not null) and (timer_seconds is null or timer_seconds > 0))",
     );
+    expect(b15).toContain("check (final_minutes_taken is null or final_minutes_taken >= 0)");
+    // the migration's own top-level statements (function bodies excluded: start_team_competition legitimately sets
+    // the window of a team that is starting) must never rewrite a started team's window
+    const statements = b15.replace(/\$\$[\s\S]*?\$\$/g, "").replace(/^--.*$/gm, "");
+    expect(statements).not.toMatch(/update teams[^;]*\bset\b[^;]*\b(started_at|ends_at)\s*=/i);
   });
 
   it("coins and UFM constants match", () => {
@@ -153,7 +168,7 @@ describe("seed", () => {
   });
 });
 
-describe("no stale 4-hour / 12-theme assumptions in architecture, schema, source or tests", () => {
+describe("no stale 2-hour / 12-theme assumptions in architecture, schema, source or tests", () => {
   // the guard itself, and the DB test that asserts the old values are NOT in the schema
   const SKIP = new Set([
     "tests/unit/db-foundation.test.ts",
@@ -172,11 +187,29 @@ describe("no stale 4-hour / 12-theme assumptions in architecture, schema, source
 
   const offenders = (re: RegExp) => scanned.filter((f) => re.test(read(f)));
 
-  it("has no Ultimate Timer of 4 h / 14,400 s / 240 min", () => {
-    // `formatDuration(14_400)` in tests/unit/home-lib.test.ts is a pure formatter check, not the competition timer.
-    const timer =
-      /14[,_ ]?400(?! *\)|"04)|4[- ]?hours?\b|\b4 ?hr\b|240 - floor|\[0, 240\]|0–240|240:00|ultimate[^\n]{0,40}240/i;
-    expect(offenders(timer)).toEqual([]);
+  it("has no hard-coded Ultimate Timer of 2 h in the application source", () => {
+    // B15 moved the allowance to 4 h and made it a per-team value the server sends (`duration_seconds`). A screen that
+    // typed "2 hours" or 7200 would silently disagree with the data, so the application code must not contain them.
+    // (Migrations, SQL tests, docs and tests legitimately mention the legacy 7200 s allowance.)
+    const timer = /\b7[,_ ]?200\b|\b2[- ]?hours?\b|\b2 ?hr\b|\b120 ?min/i;
+    expect(offenders(timer).filter((f) => f.startsWith("src/"))).toEqual([]);
+  });
+
+  it("keeps prices, rewards and durations out of the UI: they are read from the server's data", () => {
+    // These were the placeholder constants of the pre-B15 question page; the data (hints.cost,
+    // question_buy_time_options, questions.reward_coins / time_limit_seconds) is now the only source.
+    const constants = /HINT_COSTS|BUY_TIME_OPTIONS|REWARD_COINS|QUESTION_SECONDS|PLACEHOLDER_HINT/;
+    expect(offenders(constants).filter((f) => f.startsWith("src/"))).toEqual([]);
+    for (const f of [
+      "src/components/question/buy-time-dialog.tsx",
+      "src/components/question/hint-dialogs.tsx",
+      "src/components/home/final-submit-dialog.tsx",
+    ]) {
+      // no coin amount or minute count literal next to a unit in the economy components
+      expect(read(f), f).not.toMatch(
+        /\b(20|40|80|100|480|240|120)\s*(coins?|mins?|minutes|secs?|seconds)/i,
+      );
+    }
   });
 
   it("has no 12-theme / 60-question / 13-ticket / K / L assumptions", () => {

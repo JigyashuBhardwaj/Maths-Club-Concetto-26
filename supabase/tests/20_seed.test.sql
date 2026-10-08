@@ -27,7 +27,7 @@ do $$
 begin
   assert not exists (select 1 from questions where time_limit_seconds <> 240), 'question timer is 4:00 everywhere';
   assert not exists (select 1 from questions where reward_coins <> 50), 'reward is fixed per question (50)';
-  assert not exists (select 1 from hints where cost <> case tier when 1 then 40 else 80 end), 'hint prices 40/80';
+  assert not exists (select 1 from hints where cost <> case tier when 1 then 20 else 40 end), 'hint prices 20/40';
   -- Buy Time: three configurable options for every question (placeholder content, not constants)
   assert (select count(*) from question_buy_time_options) = 150, '3 options x 50 questions';
   assert not exists (select 1 from questions q where (select count(*) from question_buy_time_options o where o.question_id = q.id) <> 3), 'exactly 3 options per question';

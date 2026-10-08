@@ -246,7 +246,7 @@ end $$;
 -- ===== 8. leaderboard =================================================================================================
 update teams set final_score = 700, final_minutes_taken = 30 where team_code = 'T01';
 update teams set final_score = 700, final_minutes_taken = 20 where team_code = 'T02';
-update teams set score_override = -1201, status = 'DISQUALIFIED', started_at = now(), ended_at = now() where team_code = 'T20';
+update teams set score_override = -1201, status = 'DISQUALIFIED', started_at = now(), timer_seconds = 14400, ended_at = now() where team_code = 'T20';
 do $$
 declare lb jsonb := public.get_leaderboard('00000000-0000-0000-0000-0000000000a1'); lb2 jsonb := public.get_leaderboard(pg_temp.a2());
 begin

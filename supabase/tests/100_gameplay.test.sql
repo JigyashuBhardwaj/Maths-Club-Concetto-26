@@ -50,8 +50,8 @@ select pg_temp.at('2026-12-01 12:00:00+00');
 select pg_temp.start(1, 1, 4);
 select pg_temp.start(2, 1, 5);
 do $$ begin
-  assert (select ends_at from teams where id = pg_temp.team_id(1)) = timestamptz '2026-12-01 14:00:00+00',
-    'the team timer is exactly 7200 s from the first valid member';
+  assert (select ends_at from teams where id = pg_temp.team_id(1)) = timestamptz '2026-12-01 16:00:00+00',
+    'the team timer is exactly 14400 s from the first valid member';
   assert (select count(*) from team_themes) = 0 and (select count(*) from team_questions) = 0, 'entering the competition unlocks nothing';
 end $$;
 
@@ -149,8 +149,8 @@ begin
   assert (j->'question'->>'state') = 'ACTIVE' and (j->'question'->>'deadline')::bigint = pg_temp.ms('2026-12-01 12:09:00+00');
   assert j->'question' ? 'body_md', 'the body is delivered once the question is ACTIVE';
   assert (select count(*) from audit_events where event_type = 'QUESTION_STARTED' and team_id = pg_temp.team_id(1)) = 1;
-  -- the team timer is a separate clock: 7200 s from 12:00, untouched by the question
-  assert (select ends_at from teams where id = pg_temp.team_id(1)) = timestamptz '2026-12-01 14:00:00+00';
+  -- the team timer is a separate clock: 14400 s from 12:00, untouched by the question
+  assert (select ends_at from teams where id = pg_temp.team_id(1)) = timestamptz '2026-12-01 16:00:00+00';
   -- a second member entering later gets the SAME deadline and nothing restarts
   perform pg_temp.at('2026-12-01 12:06:00+00');
   v := pg_temp.tv(1);
@@ -218,7 +218,7 @@ begin
   assert (j->'question'->>'remaining_seconds')::int = 120;
   -- time passes: the question stays frozen, the team clock moves on
   perform pg_temp.at('2026-12-01 12:30:00+00');
-  assert (pg_temp.state(1, 1)->'team'->>'remaining_seconds')::int = 5400, 'team timer: 14:00 - 12:30';
+  assert (pg_temp.state(1, 1)->'team'->>'remaining_seconds')::int = 12600, 'team timer: 16:00 - 12:30';
   assert (select e->'questions'->0->>'state' = 'PENDING_APPROVAL' and (e->'questions'->0->>'remaining_seconds')::int = 120
             from jsonb_array_elements(pg_temp.state(1, 1)->'themes') e where (e->>'id')::int = 1), 'question timer still frozen at 120';
   assert pg_temp.q(1, 2, 1)->>'state' = 'PENDING_APPROVAL' and (pg_temp.q(1, 2, 1)->>'remaining_seconds')::int = 120;
@@ -350,8 +350,8 @@ do $$ declare e jsonb; begin
   assert (e->'question'->>'deadline')::bigint = pg_temp.ms('2026-12-01 12:58:01+00'), 'its own deadline, now + 240';
   assert (pg_temp.tq(1, 6)).state = 'ACTIVE';
   -- a different theme's timeout does not touch this one, and both teams' clocks stay separate
-  assert (select ends_at from teams where id = pg_temp.team_id(1)) = timestamptz '2026-12-01 14:00:00+00';
-  assert (select ends_at from teams where id = pg_temp.team_id(2)) = timestamptz '2026-12-01 14:00:00+00';
+  assert (select ends_at from teams where id = pg_temp.team_id(1)) = timestamptz '2026-12-01 16:00:00+00';
+  assert (select ends_at from teams where id = pg_temp.team_id(2)) = timestamptz '2026-12-01 16:00:00+00';
 end $$;
 -- a second ACTIVE question in another theme at the same time is legal
 select pg_temp.unlock(1, 1, 3, 101);

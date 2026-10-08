@@ -14,6 +14,8 @@ const DB_PORT = Number(process.env.E2E_DB_PORT ?? PORT + 1);
 process.env.E2E_DB_PORT = String(DB_PORT);
 process.env.E2E_SERVICE_KEY ??= randomBytes(24).toString("base64url");
 process.env.E2E_SESSION_PEPPER ??= randomBytes(36).toString("base64url");
+// The scheduled sweep (GET /api/cron/expire-teams) is authenticated by this shared secret; random per run as well.
+process.env.E2E_CRON_SECRET ??= randomBytes(36).toString("base64url");
 const identities = JSON.stringify(ensureIdentities());
 
 export default defineConfig({
@@ -44,9 +46,17 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
+      testIgnore: /cron\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
-    { name: "mobile", use: { ...devices["Pixel 7"] } },
+    { name: "mobile", testIgnore: /cron\.spec\.ts/, use: { ...devices["Pixel 7"] } },
+    {
+      // The scheduled sweep ends every due team, so it runs alone, once, after everything else (cron.spec.ts).
+      name: "sweep",
+      testMatch: /cron\.spec\.ts/,
+      dependencies: ["desktop", "mobile"],
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   webServer: [
     {
@@ -73,6 +83,7 @@ export default defineConfig({
         NEXT_PUBLIC_SUPABASE_URL: `http://127.0.0.1:${DB_PORT}`,
         SUPABASE_SERVICE_ROLE_KEY: process.env.E2E_SERVICE_KEY,
         SESSION_TOKEN_PEPPER: process.env.E2E_SESSION_PEPPER,
+        CRON_SECRET: process.env.E2E_CRON_SECRET,
       },
     },
   ],

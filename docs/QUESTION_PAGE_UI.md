@@ -4,23 +4,23 @@ Route: `/participant/theme/[A–J]/[1–5]` (anything else is a 404). Opened by 
 
 ## Spec → implementation
 
-| Spec item                                                                                                                                        | Where                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
-| Top-left arrow → home from any question                                                                                                          | `ArrowButton` (link to `/participant`) |
-| Centre-left arrow → previous question (disabled on Q1)                                                                                           | `question-page.tsx`                    |
-| Centre-right arrow → next question; locked until the answer is approved                                                                          | `question-page.tsx` (`nextOpen`)       |
-| Heading = "THEME A" … "THEME J"                                                                                                                  | `<h1>`                                 |
-| 5 icons in a row: ultimate timer, question timer, buy time, coins left, reward ("50 coins++")                                                    | `question-page.tsx`, `icons.tsx`       |
-| Question timer (the question's time limit); starts on the server when Q1 is entered; frozen while pending; stops being usable at zero            | `use-question-detail.ts`, `derive.ts`  |
-| Buy time dialog: 2/4/8 mins = 20/40/80 coins, "are you sure?" Yes adds time + deducts, No closes                                                 | `buy-time-dialog.tsx`                  |
-| Question box (lorem ipsum)                                                                                                                       | `.q-question`                          |
-| Two hints: ask "purchase this hint for 40 / 80 coins?" Yes/No; once owned open a hint dialog with Close                                          | `hint-dialogs.tsx`                     |
-| Answer box, CLEAR ALL                                                                                                                            | `.q-input`, `.q-clear`                 |
-| Submit: red → grey "Pending for approval" → green "Approved" (+ Next opens, coins awarded); disapproved → red again and the typed answer is kept | `question-page.tsx`, `.q-submit-*`     |
+| Spec item                                                                                                                                          | Where                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Top-left arrow → home from any question                                                                                                            | `ArrowButton` (link to `/participant`) |
+| Centre-left arrow → previous question (disabled on Q1)                                                                                             | `question-page.tsx`                    |
+| Centre-right arrow → next question; locked until the answer is approved                                                                            | `question-page.tsx` (`nextOpen`)       |
+| Heading = "THEME A" … "THEME J"                                                                                                                    | `<h1>`                                 |
+| 5 icons in a row: ultimate timer, question timer, buy time, coins left, reward ("50 coins++")                                                      | `question-page.tsx`, `icons.tsx`       |
+| Question timer (the question's time limit); starts on the server when Q1 is entered; frozen while pending; stops being usable at zero              | `use-question-detail.ts`, `derive.ts`  |
+| Buy time dialog: the packs and prices come from the server (seed: 2/4/8 mins = 20/40/80 coins), "are you sure?" Yes adds time + deducts, No closes | `buy-time-dialog.tsx`                  |
+| Question box (lorem ipsum)                                                                                                                         | `.q-question`                          |
+| Two hints: ask "purchase this hint for N coins?" (N from the server; seed 20 / 40) Yes/No; once owned open a hint dialog with Close                | `hint-dialogs.tsx`                     |
+| Answer box, CLEAR ALL                                                                                                                              | `.q-input`, `.q-clear`                 |
+| Submit: red → grey "Pending for approval" → green "Approved" (+ Next opens, coins awarded); disapproved → red again and the typed answer is kept   | `question-page.tsx`, `.q-submit-*`     |
 
 ## Decisions taken with the team
 
-- Hint prices follow the Word doc (**40 / 80**), not the image text (25 / 50).
+- Hint prices are data (`hints.cost`). B15 sets the development/CI seed to **20 / 40** to match the production decision; the Word doc said 40 / 80 and the image text 25 / 50.
 - The Q1 timer starts when the member **enters** Q1 (locked product rule), not when the theme is bought. Later questions start when the previous one is approved.
 - B13 removed the local demo and its DEMO bar. Approval and disapproval are server operations (`POST /api/admin/submissions/:id/approve|disapprove`, the minimal controlled review path); the full Admin review UI is a later patch.
 
@@ -30,7 +30,7 @@ On disapproval the answer text is **kept** (not cleared) so members can study th
 
 ## Rules mirrored from the locked design
 
-Timer pauses while pending and resumes on disapproval; reward paid once; Tier 2 hint needs Tier 1; time and hints can only be bought while the question is ACTIVE; a question that reaches zero is TIMED_OUT and blocks the next one; previous (approved) questions are read-only and show only the member's own answer, never reference answers or solution notes.
+Timer pauses while pending and resumes on disapproval; reward paid once; Tier 2 hint needs Tier 1; time can only be bought while the question is ACTIVE, hints while it is ACTIVE, PENDING_APPROVAL or APPROVED (B15); a question that reaches zero is TIMED_OUT and blocks the next one; previous (approved) questions are read-only and show only the member's own answer, never reference answers or solution notes.
 
 ## Assumptions / not implemented
 
@@ -39,7 +39,7 @@ Timer pauses while pending and resumes on disapproval; reward paid once; Tier 2 
 - After the last question (Q5) is approved the Next arrow stays disabled and the footer says "Theme complete."
 - Unlocking a theme is team-wide and charged once by the server; the home page and this page read the same snapshot (coins, team timer).
 - The draft autosaves to the server (compare-and-set on `expectedVersion`) and is shared by the team. The browser keeps only the text being typed; nothing is stored in `localStorage`/`sessionStorage`.
-- Hints and Buy Time arrive in later patches: both are shown but disabled ("coming soon"). The explanation field is sent empty (a single answer box).
+- **B15:** hints and Buy Time are live (`ECONOMY_AND_FINALIZATION.md`). Hint 2 reads "after Hint 1" until Hint 1 is owned; a frozen team (timer ended or Final Submit) cannot spend. The explanation field is sent empty (a single answer box).
 - The page learns about teammates' changes by polling `GET /api/p/state` (about every 5 s); there is no realtime push yet.
 - Mobile (< 900 px): sections stack and the arrows sit in a row above the answer box.
 

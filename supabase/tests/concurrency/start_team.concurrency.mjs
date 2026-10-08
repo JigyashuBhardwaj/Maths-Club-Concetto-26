@@ -87,7 +87,7 @@ update competition set status = 'RUNNING', opened_at = now() where id = 1;
   );
   const [count, , , span, version] = row.split("|");
   assert.equal(count, "1");
-  assert.equal(Number(span), 7200, "exactly 7200 s");
+  assert.equal(Number(span), 14400, "exactly 14400 s");
   assert.equal(version, "1", "one state_version bump");
   assert.equal(
     await must(
@@ -97,7 +97,7 @@ update competition set status = 'RUNNING', opened_at = now() where id = 1;
     "one audit row",
   );
   console.log(
-    "ok    A. four members entering together share one timer (7200 s, 1 audit row, version 1)",
+    "ok    A. four members entering together share one timer (14400 s, 1 audit row, version 1)",
   );
 }
 

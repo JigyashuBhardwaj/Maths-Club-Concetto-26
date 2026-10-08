@@ -12,24 +12,30 @@ import {
 } from "@/components/home/icons";
 import { HomeStage } from "@/components/home/home-stage";
 import { useGame, useServerNow } from "@/components/game/game-provider";
+import { QUESTIONS_PER_THEME } from "@/lib/contracts/competition";
+import type { BuyTimeOption } from "@/lib/contracts/gameplay";
+import { buyHintCall, buyTimeCall } from "@/lib/economy/client";
 import { submitAnswerCall } from "@/lib/gameplay/client";
 import {
+  canPlay,
   clocksRunning,
   currentOrdinal,
   effectiveState,
   findTheme,
   isUnlocked,
   questionRemainingMs,
+  teamFrozen,
   teamRemainingSeconds,
 } from "@/lib/gameplay/derive";
 import { gameErrorText, isRetryable } from "@/lib/gameplay/messages";
 import { formatDuration, formatMinSec } from "@/lib/home/format";
 import type { ThemeId } from "@/lib/home/themes";
-import { QUESTIONS_PER_THEME } from "@/lib/question/constants";
 import { newIdempotencyKey } from "@/lib/provisioning/client";
 import { cn } from "@/lib/utils";
 
 import { ArrowButton } from "./arrow-button";
+import { BuyTimeDialog } from "./buy-time-dialog";
+import { HintDialogs } from "./hint-dialogs";
 import { useDraft, type SaveStatus } from "./use-draft";
 import { useQuestionDetail } from "./use-question-detail";
 
@@ -52,10 +58,11 @@ const SAVE_TEXT: Record<SaveStatus, string> = {
  * question), the deadline, the draft shared with teammates, the submission and its review, the coin balance and the
  * team timer. Opening an AVAILABLE question starts its timer once on the server (there is no Start button). The only
  * thing kept in the browser is the text being typed, which autosaves to the server after a pause. Hints and Buy Time
- * arrive in a later patch and are shown disabled.
+ * (Patch B15) are team-wide purchases whose prices, packs and texts all come from the server; once the team is frozen
+ * (time up or final submission) every control here is read-only.
  */
 export function QuestionPage({ theme, n }: QuestionPageProps) {
-  const { state, loadFailed, refresh } = useGame();
+  const { state, loadFailed, refresh, apply } = useGame();
   const now = useServerNow();
   const answerId = useId();
   const titleLabel = `THEME ${theme}`;
@@ -67,14 +74,26 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
   const q = detail.question;
 
   const running = state ? clocksRunning(state) : false;
+  const frozen = state ? teamFrozen(state, now) : false;
+  const playable = state ? canPlay(state, now) : false;
   const shownState = summary && state ? effectiveState(summary, state, now) : undefined;
-  const isActive = shownState === "ACTIVE" && running;
+  const isActive = shownState === "ACTIVE" && playable;
   const serverDraft = q?.draft;
   const draft = useDraft(summary?.id, serverDraft, isActive);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const submitKey = useRef<{ text: string; key: string } | null>(null);
+
+  // Hints (team-wide) and Buy Time. One idempotency key per user intent, kept until the server answers definitively.
+  const [hintUi, setHintUi] = useState<{ tier: 1 | 2; mode: "buy" | "view" } | null>(null);
+  const [hintBusy, setHintBusy] = useState(false);
+  const [hintError, setHintError] = useState<string | null>(null);
+  const hintKey = useRef<{ id: number; tier: number; key: string } | null>(null);
+  const [buyOpen, setBuyOpen] = useState(false);
+  const [buyBusy, setBuyBusy] = useState(false);
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const timeKey = useRef<{ id: number; option: number; count: number; key: string } | null>(null);
 
   // The effective state flipped to TIMED_OUT locally: ask the server for its own view straight away.
   const flipped = useRef(false);
@@ -155,6 +174,74 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
     detail.reload();
   };
 
+  const buyHint = async (tier: 1 | 2) => {
+    if (hintBusy) return;
+    setHintBusy(true);
+    setHintError(null);
+    if (hintKey.current?.id !== summary.id || hintKey.current.tier !== tier) {
+      hintKey.current = { id: summary.id, tier, key: newIdempotencyKey() };
+    }
+    const r = await buyHintCall(summary.id, tier, hintKey.current.key);
+    setHintBusy(false);
+    if (r.ok) {
+      hintKey.current = null;
+      detail.adopt(r.data.question);
+      apply(r.data.state);
+      setHintUi({ tier, mode: "view" });
+      return;
+    }
+    if (!isRetryable(r.code)) hintKey.current = null;
+    setHintError(gameErrorText(r.code));
+    void refresh();
+    detail.reload();
+  };
+
+  const buyTime = async (option: BuyTimeOption) => {
+    if (buyBusy || !q) return;
+    const expected = q.buy_time.purchase_count;
+    setBuyBusy(true);
+    setBuyError(null);
+    const k = timeKey.current;
+    if (k?.id !== summary.id || k.option !== option.id || k.count !== expected) {
+      timeKey.current = {
+        id: summary.id,
+        option: option.id,
+        count: expected,
+        key: newIdempotencyKey(),
+      };
+    }
+    const r = await buyTimeCall(summary.id, option.id, expected, timeKey.current!.key);
+    setBuyBusy(false);
+    if (r.ok) {
+      timeKey.current = null;
+      detail.adopt(r.data.question);
+      apply(r.data.state);
+      setBuyOpen(false);
+      return;
+    }
+    if (!isRetryable(r.code)) timeKey.current = null;
+    setBuyError(gameErrorText(r.code));
+    void refresh();
+    detail.reload();
+  };
+
+  const canBuyTime = isActive && (q?.buy_time.can_buy ?? false);
+  const hintButtons = ([1, 2] as const).map((tier) => {
+    const h = q?.hints.find((x) => x.tier === tier);
+    const owned = h?.owned ?? false;
+    const buyable = h !== undefined && h.purchasable && playable;
+    const sub = !h
+      ? ""
+      : owned
+        ? "unlocked"
+        : buyable
+          ? `${h.cost} coins`
+          : tier === 2 && !q?.hints.find((x) => x.tier === 1)?.owned
+            ? "after Hint 1"
+            : "unavailable";
+    return { tier, owned, buyable, sub, disabled: !h || (!owned && !buyable) };
+  });
+
   const submitUi = {
     ACTIVE: { label: submitting ? "Submitting…" : "Submit", cls: "q-submit-red" },
     PENDING_APPROVAL: { label: "Pending for approval", cls: "q-submit-grey" },
@@ -168,19 +255,23 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
   const note =
     submitError ??
     detail.error ??
-    (status === "TIMED_OUT"
-      ? "Time is up for this question."
-      : status === "PENDING_APPROVAL"
-        ? "Your team's answer is waiting for review."
-        : done
-          ? "Theme complete."
-          : status === "APPROVED"
-            ? `Approved. +${q?.submission?.reward_awarded ?? reward ?? 0} coins`
-            : !running && status === "ACTIVE"
-              ? "The competition is paused."
-              : q?.last_rejection
-                ? `Not approved${q.last_rejection.note ? `: ${q.last_rejection.note}` : "."} You can edit and submit again.`
-                : SAVE_TEXT[draft.status]);
+    (frozen && (status === "ACTIVE" || status === "TIMED_OUT" || status === "AVAILABLE")
+      ? state.team.status === "FINAL_SUBMITTED"
+        ? "Your team has made its final submission."
+        : "Your team's time is up."
+      : status === "TIMED_OUT"
+        ? "Time is up for this question."
+        : status === "PENDING_APPROVAL"
+          ? "Your team's answer is waiting for review."
+          : done
+            ? "Theme complete."
+            : status === "APPROVED"
+              ? `Approved. +${q?.submission?.reward_awarded ?? reward ?? 0} coins`
+              : !running && status === "ACTIVE"
+                ? "The competition is paused."
+                : q?.last_rejection
+                  ? `Not approved${q.last_rejection.note ? `: ${q.last_rejection.note}` : "."} You can edit and submit again.`
+                  : SAVE_TEXT[draft.status]);
 
   return (
     <HomeStage>
@@ -223,8 +314,11 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
               type="button"
               className="stat stat-button"
               aria-haspopup="dialog"
-              disabled
-              title="Coming soon"
+              disabled={!canBuyTime}
+              onClick={() => {
+                setBuyError(null);
+                setBuyOpen(true);
+              }}
             >
               <WalletIcon className="stat-icon stat-icon-wallet" />
               <span className="stat-text">
@@ -260,10 +354,20 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
               </p>
             </div>
             <div className="q-hints" role="group" aria-label="Hints">
-              {([1, 2] as const).map((tier) => (
-                <button key={tier} type="button" className="q-hint" disabled aria-haspopup="dialog">
-                  <span className="q-hint-name">Hint {tier}</span>
-                  <span className="q-hint-sub">coming soon</span>
+              {hintButtons.map((h) => (
+                <button
+                  key={h.tier}
+                  type="button"
+                  className="q-hint"
+                  disabled={h.disabled}
+                  aria-haspopup="dialog"
+                  onClick={() => {
+                    setHintError(null);
+                    setHintUi({ tier: h.tier, mode: h.owned ? "view" : "buy" });
+                  }}
+                >
+                  <span className="q-hint-name">Hint {h.tier}</span>
+                  <span className="q-hint-sub">{h.sub}</span>
                 </button>
               ))}
             </div>
@@ -336,6 +440,28 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
             </button>
           </div>
         </section>
+
+        <BuyTimeDialog
+          open={buyOpen}
+          options={q?.buy_time.options ?? []}
+          coins={state.team.coins}
+          canBuy={canBuyTime}
+          teamRemainingSeconds={teamRemainingSeconds(state, now)}
+          questionRemainingSeconds={Math.ceil(leftMs / 1000)}
+          busy={buyBusy}
+          error={buyError}
+          onClose={() => setBuyOpen(false)}
+          onConfirm={(option) => void buyTime(option)}
+        />
+        <HintDialogs
+          active={hintUi}
+          hints={q?.hints ?? []}
+          coins={state.team.coins}
+          busy={hintBusy}
+          error={hintError}
+          onClose={(mode) => setHintUi((cur) => (cur?.mode === mode ? null : cur))}
+          onBuy={(tier) => void buyHint(tier)}
+        />
       </main>
     </HomeStage>
   );

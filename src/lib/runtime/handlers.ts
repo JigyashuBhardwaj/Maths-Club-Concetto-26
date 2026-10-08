@@ -8,6 +8,7 @@ import {
   startResultSchema,
   statusResultSchema,
   teamStateSchema,
+  type TeamState,
 } from "@/lib/contracts/runtime";
 import { DbError, type Db, type DbFunction } from "@/lib/db/adapter";
 import { readJson, type AuthDeps } from "@/lib/auth/handlers";
@@ -38,6 +39,55 @@ export async function callDb(
   } catch (err) {
     if (err instanceof DbError) throw dbRaisedToApiError(err.appCode, err.details);
     throw err;
+  }
+}
+
+/**
+ * Persists the ENDED status of a team whose timer has reached zero (Patch B15). A request that the database refuses
+ * RAISES, and a raise rolls the transaction back, so an expiry discovered inside a refused request could never be saved;
+ * this separate, non-raising call does it afterwards. It is idempotent, harmless when the team is not actually due, and
+ * can never break the response it is called for: every failure is swallowed (the snapshot already reports the team as
+ * expired and frozen, and the cron sweep is the safety net).
+ */
+export async function finalizeIfDue(db: Db, teamId: string): Promise<void> {
+  try {
+    await db.rpc("finalize_team_if_due", { p_team_id: teamId });
+  } catch {
+    // intentionally ignored
+  }
+}
+
+/**
+ * `callDb` for a participant's request: when the database says the team's time has ended (TEAM_ENDED), the status is
+ * persisted before the error goes back, so the next read already shows ENDED.
+ */
+export async function callParticipantDb(
+  db: Db,
+  teamId: string,
+  fn: DbFunction,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  try {
+    return await callDb(db, fn, args);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "TEAM_ENDED") await finalizeIfDue(db, teamId);
+    throw err;
+  }
+}
+
+/**
+ * The caller's team snapshot. A RUNNING team whose timer has expired is finalized first (lazy finalization, the primary
+ * correctness path) and read again; if that fails the first snapshot, which already says expired + frozen, is returned.
+ */
+export async function readTeamState(db: Db, teamId: string, memberId: string): Promise<TeamState> {
+  const args = { p_team_id: teamId, p_member_id: memberId };
+  const state = parseResult(teamStateSchema, await callDb(db, "get_team_state", args));
+  if (!(state.team.expired && state.team.status === "RUNNING")) return state;
+  await finalizeIfDue(db, teamId);
+  try {
+    return parseResult(teamStateSchema, await callDb(db, "get_team_state", args));
+  } catch {
+    return state;
   }
 }
 
@@ -128,13 +178,7 @@ export function createTeamStateHandler(deps: RuntimeDeps) {
         const principal = requireParticipant(
           await resolvePrincipal(db, request, env.SESSION_TOKEN_PEPPER),
         );
-        const state = parseResult(
-          teamStateSchema,
-          await callDb(db, "get_team_state", {
-            p_team_id: principal.team.id,
-            p_member_id: principal.member.id,
-          }),
-        );
+        const state = await readTeamState(db, principal.team.id, principal.member.id);
         return success(state, state.server_now, { stateVersion: state.state_version });
       },
       buildClearedSessionCookie,

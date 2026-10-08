@@ -33,8 +33,8 @@ test.describe("participant home", () => {
       await expect(page.getByRole("img", { name: alt })).toBeVisible();
     }
     // B13: the numbers are the server's. The shared team entered the competition in global setup, so its team timer is
-    // running (just under 02:00:00) and it still holds the starting 500 coins; its rank and score are not published yet.
-    await expect(page.locator(".home-stats .stat-value").first()).toHaveText(/^0[12]:\d\d:\d\d$/);
+    // running (just under 04:00:00) and it still holds the starting 500 coins; its rank and score are not published yet.
+    await expect(page.locator(".home-stats .stat-value").first()).toHaveText(/^0[34]:\d\d:\d\d$/);
     await expect(page.getByText("500", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Live Leaderboard" })).toBeVisible();
     await expect(page.getByLabel("Your rank")).toHaveText("—");
@@ -159,15 +159,16 @@ test.describe("participant home", () => {
     await expect(dialog).toBeHidden();
   });
 
-  test("final dialog: both buttons close it", async ({ page }) => {
+  test("final dialog: Go back closes it and submits nothing", async ({ page }) => {
+    // "Yes, submit" is irreversible since B15 (it freezes the whole team), so it is exercised on a throw-away team in
+    // final-submit.spec.ts and never on the team the specs share.
     await page.goto("/participant");
-    for (const label of ["Go back", "Yes, submit"]) {
-      await openTicket(page, "FINAL SUBMIT");
-      const dialog = page.getByRole("dialog", { name: "Final Submit" });
-      await expect(dialog).toBeVisible();
-      await dialog.getByRole("button", { name: label }).click();
-      await expect(dialog).toBeHidden();
-    }
+    await openTicket(page, "FINAL SUBMIT");
+    const dialog = page.getByRole("dialog", { name: "Final Submit" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Go back" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator(".ticket").last()).toHaveText(/FINAL SUBMIT/);
   });
 
   test("spiral turns by itself, pauses while a dialog is open", async ({ page }, info) => {

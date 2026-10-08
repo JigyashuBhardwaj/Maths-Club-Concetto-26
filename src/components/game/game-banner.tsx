@@ -13,6 +13,8 @@ export function GameBanner() {
   else if (state?.team.status === "RUNNING" && state.competition.status === "ENDED")
     text = "The competition has ended.";
   else if (state?.team.status === "ENDED") text = "Your team's time is up.";
+  else if (state?.team.status === "RUNNING" && state.team.frozen)
+    text = "Your team's time is up."; // the timer reached zero; the server stores ENDED on the next read
   else if (state?.team.status === "FINAL_SUBMITTED")
     text = "Your team has made its final submission.";
   else if (state?.team.status === "DISQUALIFIED") text = "Your team has been disqualified.";

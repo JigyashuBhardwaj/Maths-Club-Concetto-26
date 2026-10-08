@@ -62,12 +62,13 @@ const teamState = (over: Record<string, unknown> = {}) => ({
     status: "RUNNING",
     coins: 500,
     started_at: 1_760_000_000_000,
-    ends_at: 1_760_007_200_000,
+    ends_at: 1_760_014_400_000,
     ended_at: null,
     final_submitted_at: null,
-    duration_seconds: 7200,
-    remaining_seconds: 7199,
+    duration_seconds: 14400,
+    remaining_seconds: 14399,
     expired: false,
+    frozen: false,
   },
   themes,
   ...over,
@@ -166,8 +167,8 @@ describe("POST /api/p/start", () => {
     expect(body.data.started_now).toBe(true);
     expect(body.data.team).toMatchObject({
       status: "RUNNING",
-      remaining_seconds: 7199,
-      duration_seconds: 7200,
+      remaining_seconds: 14399,
+      duration_seconds: 14400,
     });
     // the session lookup used only the peppered hash; the engine call used the session's ids and the header key
     expect(calls[0]).toEqual({
@@ -237,7 +238,7 @@ describe("POST /api/p/start", () => {
     const body = await json(await createStartTeamHandler(deps(db))(post("/api/p/start")));
     expect(body.data.started_now).toBe(false);
     expect(body.data.team.started_at).toBe(1_760_000_000_000);
-    expect(body.data.team.ends_at).toBe(1_760_007_200_000);
+    expect(body.data.team.ends_at).toBe(1_760_014_400_000);
   });
 
   it("403 for another origin, with no database access at all", async () => {
@@ -327,7 +328,9 @@ describe("POST /api/p/start", () => {
       null,
       {},
       startResult({ state: { ...teamState(), team: undefined } }),
-      startResult({ state: teamState({ team: { ...teamState().team, remaining_seconds: 9000 } }) }),
+      startResult({
+        state: teamState({ team: { ...teamState().team, remaining_seconds: 15000 } }),
+      }),
     ]) {
       const { db } = fakeDb(participant, () => bad);
       const res = await createStartTeamHandler(deps(db))(post("/api/p/start"));
@@ -358,6 +361,7 @@ describe("GET /api/p/state", () => {
       "ends_at",
       "expired",
       "final_submitted_at",
+      "frozen",
       "remaining_seconds",
       "started_at",
       "status",
@@ -390,17 +394,58 @@ describe("GET /api/p/state", () => {
     expect(text).not.toMatch(/hash|\$2a\$|deadbeef|admission|login_id|team17/i);
   });
 
-  it("reports an expired team as expired with 0 seconds, without changing anything", async () => {
+  it("an expired team is finalized (ENDED stored) before it is shown, and the fresh snapshot is returned", async () => {
     const expired = teamState({
-      team: { ...teamState().team, remaining_seconds: 0, expired: true },
+      team: { ...teamState().team, remaining_seconds: 0, expired: true, frozen: true },
     });
-    const { db, ops } = fakeDb(participant, () => expired);
+    const ended = teamState({
+      team: {
+        ...teamState().team,
+        status: "ENDED",
+        remaining_seconds: 0,
+        expired: false,
+        frozen: true,
+      },
+    });
+    let reads = 0;
+    const { db, ops } = fakeDb(participant, (fn) => {
+      if (fn === "finalize_team_if_due") return { finalized: true, status: "ENDED" };
+      return ++reads === 1 ? expired : ended;
+    });
     const body = await json(await createTeamStateHandler(deps(db))(get("/api/p/state")));
-    expect(body.data.team).toMatchObject({
+    expect(body.data.team).toMatchObject({ status: "ENDED", remaining_seconds: 0, frozen: true });
+    expect(ops()).toEqual([
+      { fn: "get_team_state", args: { p_team_id: TEAM_ID, p_member_id: MEMBER_ID } },
+      { fn: "finalize_team_if_due", args: { p_team_id: TEAM_ID } },
+      { fn: "get_team_state", args: { p_team_id: TEAM_ID, p_member_id: MEMBER_ID } },
+    ]);
+  });
+
+  it("if finalizing fails the first snapshot (already expired + frozen) is still returned: never a 5xx", async () => {
+    const expired = teamState({
+      team: { ...teamState().team, remaining_seconds: 0, expired: true, frozen: true },
+    });
+    const { db, ops } = fakeDb(participant, (fn) =>
+      fn === "finalize_team_if_due" ? new Error("database is down") : expired,
+    );
+    const res = await createTeamStateHandler(deps(db))(get("/api/p/state"));
+    expect(res.status).toBe(200);
+    expect((await json(res)).data.team).toMatchObject({
       status: "RUNNING",
       remaining_seconds: 0,
       expired: true,
+      frozen: true,
     });
+    expect(ops().map((c) => c.fn)).toEqual([
+      "get_team_state",
+      "finalize_team_if_due",
+      "get_team_state",
+    ]);
+  });
+
+  it("a team that is not expired is read once and nothing is finalized", async () => {
+    const { db, ops } = fakeDb(participant, () => teamState());
+    await createTeamStateHandler(deps(db))(get("/api/p/state"));
     expect(ops().map((c) => c.fn)).toEqual(["get_team_state"]);
   });
 

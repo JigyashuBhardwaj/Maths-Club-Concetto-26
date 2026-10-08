@@ -35,20 +35,20 @@ Applying to Supabase later: `supabase db push` (or run the migrations in order);
 
 ## Locked values encoded in the schema
 
-| Rule                         | Where                                                                                                                      |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Ultimate Team Timer 2 h      | `competition.ultimate_seconds = 7200` (check `competition_ultimate_locked_7200`), generated `ultimate_minutes = 120`       |
-| Scoring minutes              | `120 − floor(remaining_seconds / 60)`, clamped 0–120 (domain rule for the later engine); `teams.final_minutes_taken` 0–120 |
-| 10 themes × 5 questions = 50 | `themes.id 1–10`, `code A–J`; `questions.id 1–50 = (theme−1)×5 + ordinal`; seed assertions; no K/L                         |
-| Q1 `AVAILABLE` after unlock  | `team_questions` (only Q1 may be `AVAILABLE`; no `activated_at`/deadline until `ACTIVE`)                                   |
-| QN+1 only after QN approved  | trigger `QUESTION_PREVIOUS_NOT_APPROVED`                                                                                   |
-| One pending submission       | unique partial index `submissions_one_pending`; rejected rows are kept                                                     |
-| Buy Time options             | `question_buy_time_options` (configurable seconds/cost/cap per question), `team_time_purchases` + guard trigger            |
-| Tier 2 needs Tier 1          | trigger `HINT_TIER1_REQUIRED`, one purchase per (team, hint)                                                               |
-| 500 starting coins, ledger   | `competition.initial_coins`, immutable `coin_transactions` with balance-chain trigger and per-subject unique indexes       |
-| UFM                          | `score_reset_baseline/at` paired; floor `reset_floor_score = −1200`; DQ `score_override = −1201`, only when `DISQUALIFIED` |
-| Rejected draft is kept       | `answer_drafts` is independent of `submissions`; nothing clears it on rejection (locked UI-2.1 rule)                       |
-| Roles                        | one `SUPER_ADMIN` (unique index); `ADMIN` rows need a creator; PARTICIPANT = member of a team (M1–M4 = `slot`)             |
+| Rule                         | Where                                                                                                                                                                                           |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ultimate Team Timer          | `competition.ultimate_seconds = 14400` since B15 (check `competition_ultimate_locked_14400`, generated `ultimate_minutes = 240`; 7200 until B14). Each team keeps its own `teams.timer_seconds` |
+| Scoring minutes              | `120 − floor(remaining_seconds / 60)`, clamped 0–120 (domain rule for the later engine); `teams.final_minutes_taken` ≥ 0 since B15                                                              |
+| 10 themes × 5 questions = 50 | `themes.id 1–10`, `code A–J`; `questions.id 1–50 = (theme−1)×5 + ordinal`; seed assertions; no K/L                                                                                              |
+| Q1 `AVAILABLE` after unlock  | `team_questions` (only Q1 may be `AVAILABLE`; no `activated_at`/deadline until `ACTIVE`)                                                                                                        |
+| QN+1 only after QN approved  | trigger `QUESTION_PREVIOUS_NOT_APPROVED`                                                                                                                                                        |
+| One pending submission       | unique partial index `submissions_one_pending`; rejected rows are kept                                                                                                                          |
+| Buy Time options             | `question_buy_time_options` (configurable seconds/cost/cap per question), `team_time_purchases` + guard trigger                                                                                 |
+| Tier 2 needs Tier 1          | trigger `HINT_TIER1_REQUIRED`, one purchase per (team, hint)                                                                                                                                    |
+| 500 starting coins, ledger   | `competition.initial_coins`, immutable `coin_transactions` with balance-chain trigger and per-subject unique indexes                                                                            |
+| UFM                          | `score_reset_baseline/at` paired; floor `reset_floor_score = −1200`; DQ `score_override = −1201`, only when `DISQUALIFIED`                                                                      |
+| Rejected draft is kept       | `answer_drafts` is independent of `submissions`; nothing clears it on rejection (locked UI-2.1 rule)                                                                                            |
+| Roles                        | one `SUPER_ADMIN` (unique index); `ADMIN` rows need a creator; PARTICIPANT = member of a team (M1–M4 = `slot`)                                                                                  |
 
 ## Security foundation
 
@@ -102,7 +102,7 @@ pause — real parallel sessions that hold the team lock for a second so the oth
 
 - **Sessions:** the approved design (decision A2) has one `sessions` table. `member_sessions`, `admin_sessions` and
   `team_sessions` exist as read-only views over it (the option chosen for this patch). The team's authoritative timer lives on `teams`.
-- **The timer is locked in the database** (`ultimate_seconds = 7200`). Tests that need other times use the controllable
+- **The timer is locked in the database** (`ultimate_seconds = 14400` since B15; teams started under 7200 keep it in `teams.timer_seconds`). Tests that need other times use the controllable
   clock `app.now()`, not a different duration. Relax the check deliberately if that is ever wanted.
 - **Buy Time options:** the question UI offers three options (+2/+4/+8 min for 20/40/80 coins). They live in
   `question_buy_time_options` (`seconds`, `cost`, nullable `max_purchases`, `display_order`), not in the engine and not on `questions`.
@@ -153,3 +153,9 @@ Read side only. The same privilege model (explicit revoke / grant to `service_ro
 `public.list_pending_submissions` (the temporary B13 review queue) is **dropped**: the matrix drill-down replaces it. The reward stays question-level data (`questions.reward_coins`, seeded to 50); `approve_submission` was not changed.
 
 Tests: `110_admin_matrix.test.sql` (presence boundaries, ownership, cell colours, approval/reward/ledger/replay, configurable reward, disapproval, theme completion) and the existing `concurrency/team_play.concurrency.mjs` (approval race, retry storm).
+
+## Timer, economy and Final Submit (migrations 16 and 17, Patch B15)
+
+Migration 16: the 4-hour allowance, the per-team `teams.timer_seconds` snapshot (7200 for teams that were already started), `finalize_team_if_due` and `expire_due_teams`. Migration 17: `buy_hint`, `buy_time`, `final_submit`, and the hint / Buy Time fields of `app.question_json`. Everything is described in `ECONOMY_AND_FINALIZATION.md`.
+
+Tests: `120_timer_14400_finalization`, `130_hints_and_buy_time`, `140_final_submit_freeze`, `concurrency/team_economy.concurrency.mjs`, `upgrade/b15_upgrade.upgrade.mjs`.
