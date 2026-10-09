@@ -38,23 +38,24 @@ function walk(dir: string, out: string[] = []): string[] {
 
 describe("migrations", () => {
   it("are ordered, uniquely numbered and complete", () => {
-    expect(migrationNames).toHaveLength(17);
+    expect(migrationNames).toHaveLength(18);
     for (const f of migrationNames) expect(f).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
     expect(new Set(migrationNames.map((f) => f.slice(0, 14))).size).toBe(migrationNames.length);
     expect(migrationNames[0]).toContain("extensions_enums_clock");
-    expect(migrationNames.at(-9)).toContain("security_rls");
-    expect(migrationNames.at(-8)).toContain("buy_time_options");
-    expect(migrationNames.at(-7)).toContain("auth_functions");
-    expect(migrationNames.at(-6)).toContain("runtime_engine");
-    expect(migrationNames.at(-5)).toContain("provisioning");
-    expect(migrationNames.at(-4)).toContain("gameplay_engine");
-    expect(migrationNames.at(-3)).toContain("admin_matrix");
-    expect(migrationNames.at(-2)).toContain("timer_14400_and_finalization");
-    expect(migrationNames.at(-1)).toContain("economy_and_final_submit");
+    expect(migrationNames.at(-10)).toContain("security_rls");
+    expect(migrationNames.at(-9)).toContain("buy_time_options");
+    expect(migrationNames.at(-8)).toContain("auth_functions");
+    expect(migrationNames.at(-7)).toContain("runtime_engine");
+    expect(migrationNames.at(-6)).toContain("provisioning");
+    expect(migrationNames.at(-5)).toContain("gameplay_engine");
+    expect(migrationNames.at(-4)).toContain("admin_matrix");
+    expect(migrationNames.at(-3)).toContain("timer_14400_and_finalization");
+    expect(migrationNames.at(-2)).toContain("economy_and_final_submit");
+    expect(migrationNames.at(-1)).toContain("scoring_leaderboard_penalty");
   });
 
   // B9 (auth_functions), B10 (runtime_engine), B12 (provisioning), B13 (gameplay_engine), B14 (admin_matrix) and B15
-  // (timer_14400_and_finalization, economy_and_final_submit): each function is explicitly revoked from PUBLIC and granted to
+  // (timer_14400_and_finalization, economy_and_final_submit) and B16 (scoring_leaderboard_penalty): each function is explicitly revoked from PUBLIC and granted to
   // service_role only, and every SECURITY DEFINER function pins its search_path.
   for (const [suffix, minFunctions, minDefiners] of [
     ["auth_functions", 11, 3],
@@ -64,6 +65,7 @@ describe("migrations", () => {
     ["admin_matrix", 4, 2],
     ["timer_14400_and_finalization", 4, 3],
     ["economy_and_final_submit", 5, 4],
+    ["scoring_leaderboard_penalty", 10, 6],
   ] as const) {
     it(`restrict every ${suffix} function explicitly: revoke from PUBLIC/anon/authenticated, grant to service_role`, () => {
       const file = migrationNames.find((f) => f.includes(suffix)) ?? "";
@@ -124,7 +126,9 @@ describe("the database agrees with the TypeScript contract", () => {
     expect(TEAM_TIMER_SECONDS).toBe(14400);
     expect(TEAM_TIMER_MINUTES).toBe(240);
     // The migrations are append-only: B1 created the 7200 default and B15 (migration 16) moves it forward.
-    const b15 = read(`supabase/migrations/${migrationNames.at(-2)}`);
+    const b15 = read(
+      `supabase/migrations/${migrationNames.find((f) => f.includes("timer_14400_and_finalization"))}`,
+    );
     expect(b15).toContain(
       `alter table competition alter column ultimate_seconds set default ${TEAM_TIMER_SECONDS};`,
     );

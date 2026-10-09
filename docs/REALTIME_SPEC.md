@@ -28,7 +28,7 @@ All payloads are small and contain **no sensitive data**:
 |---------|----------------|--------------------|-------|
 | `team:{team_id}` | the team's ≤ 4 members; the assigned admin; the Super Admin | `team.state_changed {v, reason}` | Also hosts **presence** for that team (presence key = `member_id`). Members `track()`; admins only observe |
 | `admin:{staff_id}` | that admin (and Super Admin for their own) | `admin.queue_changed {team_id, pending}`; `admin.member_violation {team_id, member_id}` | Drives the review inbox and a visible alert for fullscreen exits |
-| `global` | every logged-in client | `leaderboard.updated {computed_at}`; `competition.status_changed {status, v}` | One message every ≤ 60 s for the leaderboard; rare for status |
+| `global` | every logged-in client | `leaderboard.updated {computed_at}`; `competition.status_changed {status, v}` | One message every ≤ 60 s for the leaderboard; rare for status **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]** |
 
 `reason` values (for debugging and for UX hints, never for logic): `TEAM_STARTED`, `THEME_UNLOCKED`, `QUESTION_STARTED`, `HINT_PURCHASED`, `TIME_PURCHASED`, `ANSWER_SUBMITTED`, `SUBMISSION_APPROVED`, `SUBMISSION_REJECTED`, `TEAM_FINAL_SUBMITTED`, `TEAM_ENDED`, `UFM`, `DRAFT_SAVED`.
 
@@ -68,10 +68,10 @@ Rules:
 
 ## 6. Leaderboard cadence
 
-* A `pg_cron` job runs `refresh_leaderboard()` every 60 s (and on team finalisation, throttled to at most once per 10 s). It writes one row to `leaderboard_snapshot` and emits `leaderboard.updated` on `global`.
+* A `pg_cron` job runs `refresh_leaderboard()` every 60 s (and on team finalisation, throttled to at most once per 10 s). It writes one row to `leaderboard_snapshot` and emits `leaderboard.updated` on `global`. **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]**
 * `GET /api/leaderboard` returns that row with `Cache-Control: public, s-maxage=20, stale-while-revalidate=30`, so 300 clients cause only a few database reads per minute. It is identical for everyone; each client picks out its own team's row locally.
 * Because the score includes `−5 × minutes taken`, the live score of every running team legitimately changes every minute, which is exactly why the brief's "update every minute" is the correct cadence.
-* Teams in `NOT_STARTED` are excluded (`DEC-11`). Ranking: score desc, then fewer minutes taken, then `team_code` for stability.
+* Teams in `NOT_STARTED` are excluded (`DEC-11`). Ranking: score desc, then fewer minutes taken, then `team_code` for stability. **[B16: Changed in B16: NOT_STARTED teams are listed, after started ones. See SCORING_AND_LEADERBOARD.md.]**
 
 ## 7. Volume estimates against Pro limits (500 msg/s, 500 connections)
 
@@ -79,7 +79,7 @@ Rules:
 |---------|----------|----------|
 | Connections | 300–400 participants + ≤ 20 staff | ≤ 420 of 500 (84%) |
 | Team pings | ~1 per purchase/submit/review; < 5/s overall × 4 recipients | < 20 msg/s |
-| Leaderboard ping | 1/60 s × 420 recipients | ~7 msg/s |
+| Leaderboard ping | 1/60 s × 420 recipients | ~7 msg/s **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]** |
 | Presence | login storm ≈ 27 msg/s for ~1 min; then ~0 | < 50/s |
 | Staff alerts | negligible | — |
 

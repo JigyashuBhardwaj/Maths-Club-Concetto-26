@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EntryGate } from "@/components/game/entry-gate";
@@ -50,6 +50,14 @@ const withGame = (ui: React.ReactNode, initial = snapshot()) => {
 };
 
 describe("Leaderboard", () => {
+  // jitter is centred (random = 0.5 -> factor 1) so the fake clock sees exact intervals; the jitter itself is tested in board-poller.test.ts
+  beforeEach(() => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
   it("shows the viewing team line and 100 empty ranked rows", async () => {
     render(<Leaderboard me={ME} />);
     expect(screen.getByRole("heading", { name: "Live Leaderboard" })).toBeInTheDocument();
@@ -60,41 +68,85 @@ describe("Leaderboard", () => {
     expect(screen.getByText("#100")).toBeInTheDocument();
   });
 
-  it("fills rows from the source and refreshes every interval", async () => {
+  const line = (rank: number, teamId: string, score: number) => ({ rank, teamId, score });
+
+  it("fills rows from the source, shows them in the SERVER's order, and refreshes every interval", async () => {
     vi.useFakeTimers();
     const source = vi
       .fn()
-      .mockResolvedValueOnce([{ teamId: "AAA", score: 5, minutesTaken: 1 }])
-      .mockResolvedValue([
-        { teamId: "AAA", score: 5, minutesTaken: 1 },
-        { teamId: "BBB", score: 9, minutesTaken: 1 },
-      ]);
-    render(<Leaderboard me={ME} source={source} intervalMs={60_000} />);
+      .mockResolvedValueOnce({ rows: [line(1, "AAA", 5)], me: null })
+      .mockResolvedValue({
+        // the server ranked BBB first; the browser must not re-sort (here BBB has the LOWER score on purpose)
+        rows: [line(1, "BBB", 2), line(2, "AAA", 9)],
+        me: line(2, "AAA", 9),
+      });
+    render(<Leaderboard me={ME} source={source} intervalMs={15_000} />);
     await act(async () => {
       await Promise.resolve();
     });
     expect(source).toHaveBeenCalledTimes(1);
     expect(screen.getByText("AAA")).toBeInTheDocument();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(15_000);
     });
     expect(source).toHaveBeenCalledTimes(2);
     const cells = screen.getAllByRole("cell").map((c) => c.textContent);
     expect(cells.indexOf("BBB")).toBeLessThan(cells.indexOf("AAA"));
+    expect(cells.slice(0, 6)).toEqual(["#1", "BBB", "2", "#2", "AAA", "9"]);
     vi.useRealTimers();
+  });
+
+  it("the own line comes from the same snapshot (rank, Team ID, score - a negative score included) and replaces the fallback", async () => {
+    const source = vi.fn().mockResolvedValue({
+      rows: [line(1, "T02", 1375), line(2, "TEAM123", -45)],
+      me: line(2, "TEAM123", -45),
+    });
+    render(<Leaderboard me={{ rank: null, teamId: "TEAM123", score: null }} source={source} />);
+    await waitFor(() => expect(screen.getByLabelText("Your rank")).toHaveTextContent("#2"));
+    expect(screen.getByLabelText("Your team ID")).toHaveTextContent("TEAM123");
+    expect(screen.getByLabelText("Your score")).toHaveTextContent("-45");
+    // the same team is also highlighted inside the table
+    const mine = document.querySelector("tr.lb-mine");
+    expect(mine).not.toBeNull();
+    expect(mine!.textContent).toBe("#2TEAM123-45");
   });
 
   it("keeps the last good rows when a refresh fails", async () => {
     vi.useFakeTimers();
     const source = vi
       .fn()
-      .mockResolvedValueOnce([{ teamId: "AAA", score: 5, minutesTaken: 1 }])
+      .mockResolvedValueOnce({ rows: [line(1, "AAA", 5)], me: line(1, "AAA", 5) })
       .mockRejectedValue(new Error("down"));
     render(<Leaderboard me={ME} source={source} intervalMs={1000} />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2500);
     });
-    expect(screen.getByText("AAA")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("AAA")).toBeInTheDocument();
+    expect(screen.getByLabelText("Your score")).toHaveTextContent("5");
+    vi.useRealTimers();
+  });
+
+  it("a change of the team's own state version refreshes the board at once (throttled), without waiting for the interval", async () => {
+    vi.useFakeTimers();
+    const source = vi.fn().mockResolvedValue({ rows: [line(1, "AAA", 5)], me: null });
+    const { rerender } = render(
+      <Leaderboard me={ME} source={source} intervalMs={60_000} refreshKey={1} />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(source).toHaveBeenCalledTimes(1);
+    rerender(<Leaderboard me={ME} source={source} intervalMs={60_000} refreshKey={2} />);
+    rerender(<Leaderboard me={ME} source={source} intervalMs={60_000} refreshKey={3} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    expect(source).toHaveBeenCalledTimes(2); // two quick changes -> ONE extra read
+    rerender(<Leaderboard me={ME} source={source} intervalMs={60_000} refreshKey={3} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(source).toHaveBeenCalledTimes(2); // an unchanged key asks for nothing
     vi.useRealTimers();
   });
 });

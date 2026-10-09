@@ -4,7 +4,7 @@
 // database, a Docker daemon or committed credentials. The app is started with NEXT_PUBLIC_SUPABASE_URL pointing here,
 // so the production code path is unchanged: there is no test switch inside the application. This process implements
 // the four authentication functions of migration 11 (participant_login, staff_login, resolve_session, revoke_session)
-// and the four provisioning functions of migration 13 (create_admin, create_team, list_admin_teams, get_leaderboard)
+// and the four provisioning functions of migration 13 (create_admin, create_team, list_admin_teams; get_leaderboard moved to fake-gameplay.mjs in B16, where the score lives)
 // with the same rules and the same JSON result shapes as the SQL. The SQL itself is proven by supabase/tests/70_auth
 // and 90_provisioning (and by the real-PostgreSQL cross-check described in docs/PROVISIONING.md).
 //
@@ -63,7 +63,6 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         id: randomUUID(),
         status: "NOT_STARTED",
         competition: "RUNNING",
-        score: 0,
         adminId: firstAdmin?.id ?? null,
         createdAt: now(),
         ...t,
@@ -237,7 +236,6 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         password: pw,
         status: "NOT_STARTED",
         competition: "RUNNING",
-        score: 0,
         coins: 500,
         adminId: caller.id,
         createdAt: now(),
@@ -280,15 +278,6 @@ export function createFakeBackend(identities, now = () => Date.now()) {
             created_at: t.createdAt,
           })),
       };
-    },
-
-    get_leaderboard(a) {
-      const caller = staffById(a.p_staff_id);
-      if (!caller || !caller.active) throw new AppError("FORBIDDEN");
-      const ranked = [...teams.values()].sort(
-        (x, y) => y.score - x.score || (x.code < y.code ? -1 : x.code > y.code ? 1 : 0),
-      );
-      return { rows: ranked.map((t, i) => ({ rank: i + 1, team_id: t.code, score: t.score })) };
     },
   };
 
@@ -460,13 +449,6 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         audit: audit.length,
         requests: requestLog.size,
       };
-    },
-    /** Sets a team's stored score (the leaderboard reads it; scoring itself is a later milestone). */
-    setScore({ code, score }) {
-      const team = [...teams.values()].find((t) => t.code === code);
-      if (!team) throw new AppError("unknown team");
-      team.score = Number(score);
-      return { ok: true };
     },
     /** Number of non-revoked, non-expired sessions of an account (so a test can assert that logout revoked it). */
     /** @param {{ username?: string, admissionNo?: string }} who */

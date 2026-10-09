@@ -37,7 +37,7 @@ A Next.js (App Router, TypeScript) application on Vercel serves the UI and a thi
 | A4 | **Pings are emitted from inside the transaction** (`realtime.send`) | An event exists iff the change committed; a serverless function dying after commit cannot lose an event | Publishing from the API route after the RPC returns (can be lost) |
 | A5 | **Timers are timestamps** (`ends_at`, `timer_deadline`) computed from DB time; paused timers are frozen integers | Survives crashes, refreshes and server restarts; no ticking job needed; global pause is a single shift | Per-second server counters / client countdowns |
 | A6 | **Lazy expiry + `pg_cron` sweeper** | Correct the instant anyone looks, and still correct when nobody is online | Sweeper only (race windows); lazy only (leaderboard stale for idle teams) |
-| A7 | **Leaderboard is a cached snapshot row** refreshed ≤ every 60 s | 300 browsers never trigger 300 aggregate queries | Per-request aggregate; per-change recompute |
+| A7 | **Leaderboard is a cached snapshot row** refreshed ≤ every 60 s | 300 browsers never trigger 300 aggregate queries | Per-request aggregate; per-change recompute **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]** |
 | A8 | **Per-team Realtime channels** (4 members each) | Presence fan-out stays at 4², not 300² | One global presence channel (≈ 90,000 messages at login) |
 | A9 | **Idempotency-Key on every mutation**, enforced by `request_log` | Retries after network loss cannot double-spend or double-approve | Hoping the client doesn't retry |
 | A10 | **Co-locate Vercel functions and Supabase** in the same region (proposed: Mumbai / `ap-south-1`, Vercel `bom1`) | Users are in India; each API call is one DB hop | Default US regions (+200 ms per call) |
@@ -104,7 +104,7 @@ Rough steady-state request rates (300 participants + ~10 staff). These are desig
 | Autosave (debounced 3 s, only while typing; worst case everyone typing) | 10–100 req/s |
 | Realtime-triggered state re-fetch | bursty, ≤ 20 req/s |
 | Fallback poll (15 s, only when the socket is down) | ≤ 20 req/s |
-| Leaderboard (60 s ping, CDN-cached 15–30 s) | ~5 req/s |
+| Leaderboard (60 s ping, CDN-cached 15–30 s) | ~5 req/s **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]** |
 | Logins at event start | ≤ 10 req/s for ~1–2 min |
 | Purchases / submissions / reviews | < 5 req/s sustained |
 

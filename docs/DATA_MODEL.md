@@ -108,8 +108,8 @@ create table teams (
   ended_at               timestamptz,                    -- set on FINAL_SUBMITTED / ENDED / DISQUALIFIED
   final_submitted_at     timestamptz,
   final_submitted_by     uuid,                           -- team_members.id
-  score_override         int,                            -- Disqualify only: -1201 (competition.disqualified_score); wins over every computed score
-  score_reset_at         timestamptz,                    -- last UFM Reset (audit/display); NULL if never reset
+  score_override         int,                            -- Disqualify only: -1201 (competition.disqualified_score); wins over every computed score **[B16: `score_override` is no longer written (no Disqualify); the official score is 0 when `ufm_penalized_at` is set. See SCORING_AND_LEADERBOARD.md.]**
+  score_reset_at         timestamptz,                    -- last UFM Reset (audit/display); NULL if never reset **[B16: `score_reset_at` is unused; UFM is `ufm_penalized_at` / `ufm_penalized_by`. See SCORING_AND_LEADERBOARD.md.]**
   score_reset_baseline   int,                            -- raw score at that instant; official score = raw - baseline afterwards
   final_score            int,                            -- cache, see compute_team_score()
   final_completed_themes int,
@@ -412,7 +412,7 @@ Audit rows are written **inside the same transaction as the change they describe
 ### 3.12 Supporting tables
 
 ```sql
-create table leaderboard_snapshot (      -- single row, refreshed at most every 60 s
+create table leaderboard_snapshot (      -- single row, refreshed at most every 60 s **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]**
   id           smallint primary key default 1 check (id = 1),
   computed_at  timestamptz not null,
   rows         jsonb not null              -- [{rank, team_id, team_name, score, status}]
@@ -471,7 +471,7 @@ select m.id as member_id, m.team_id,
 from team_members m;
 ```
 
-`compute_team_score(team_id)` is the **only** place the official score is calculated:
+`compute_team_score(team_id)` is the **only** place the official score is calculated: **[B16: Replaced by `app.compute_score` / `app.team_scores`; minutes are elapsed, not `120 − floor(remaining)`. See SCORING_AND_LEADERBOARD.md.]**
 
 ```
 completed_themes  = count(team_theme_progress.completed)
@@ -491,7 +491,7 @@ Notes:
 * **Reset is a baseline, not a pin.** `reset_score` stores `score_reset_baseline = raw_score` at that instant, so `effective_score` is exactly 0 then and moves normally afterwards: `raw 850 → Reset → 0 → earn 100 → 100`. The time penalty, purchases and rewards all keep affecting the raw score as before. A second Reset stores the then-current raw score as the new baseline.
 * **Floor (locked rule).** The reset-adjusted score may never fall below −1200 (the minimum natural score), and Disqualify is always exactly −1201, so a non-disqualified or reset team can never rank below a disqualified team.
 * **Disqualify** sets `score_override = -1201` and wins over everything; any baseline is retained for history.
-* The constants come from the `competition` row, not literals. `floor` of remaining time (`DEC-16`) means 3:59:30 remaining counts as 1 minute taken. When a team reaches a terminal state, `ref_time` is frozen at `ended_at`, so the score stops changing with the clock; the cached `final_*` values store `effective_score`.
+* The constants come from the `competition` row, not literals. `floor` of remaining time (`DEC-16`) means 3:59:30 remaining counts as 1 minute taken. When a team reaches a terminal state, `ref_time` is frozen at `ended_at`, so the score stops changing with the clock; the cached `final_*` values store `effective_score`. **[B16: Minutes taken = round(elapsed / 60), half up (DEC-16 changed). See SCORING_AND_LEADERBOARD.md.]**
 
 ## 5. Invariants (each has a test in `TEST_PLAN.md`)
 
@@ -508,7 +508,7 @@ Notes:
 | INV-09 | Exactly one `SUPER_ADMIN` row can exist. |
 | INV-10 | `audit_events` rows are never updated or deleted. |
 | INV-11 | A team owns a Tier 2 hint of a question only if it owns that question's Tier 1 hint. |
-| INV-12 | A team's official score is `score_override` if set (only for `DISQUALIFIED` teams), else `raw − baseline` floored at −1200 if it has been reset, else `raw`; `score_reset_at` and `score_reset_baseline` are both set or both null. |
+| INV-12 | A team's official score is `score_override` if set (only for `DISQUALIFIED` teams), else `raw − baseline` floored at −1200 if it has been reset, else `raw`; `score_reset_at` and `score_reset_baseline` are both set or both null. **[B16: Official score: 0 if penalised, else `score_override`, else the gameplay score. See SCORING_AND_LEADERBOARD.md.]** |
 
 ## 6. Row-level security posture
 

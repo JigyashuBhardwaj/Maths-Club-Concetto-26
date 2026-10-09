@@ -66,4 +66,4 @@ Tests: `tests/unit/matrix-handlers.test.ts`, `tests/component/{my-teams-matrix,g
 
 ## Not in this patch
 
-Hints, Buy Time, difficulty-based rewards, UFM (Reset Score / Disqualify) and the team-name click, leaderboard changes, fullscreen integrity, role-specific cookies, a final-submit engine, Realtime push.
+Hints, Buy Time, difficulty-based rewards, UFM (Reset Score / Disqualify) and the team-name click, leaderboard changes, fullscreen integrity, role-specific cookies, a final-submit engine, Realtime push. **[B16: UFM (penalty) and the Team ID click were delivered in B16. See SCORING_AND_LEADERBOARD.md.]**

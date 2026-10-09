@@ -33,9 +33,9 @@ One line per requirement extracted from the Master Brief, with where this design
 | REQ-027 | Final submit: confirm, freeze, score server-side, atomic, idempotent | 17 | STATE §5.8 |
 | REQ-028 | Auto-end at 0 enforced server-side; score saved | 18 | STATE §5.4 |
 | REQ-029 | Official score formula, server-side | 19 | DATA_MODEL §4 |
-| REQ-030 | Live leaderboard, ~1-minute refresh, DB-friendly at 300 users | 20 | REALTIME §6; DATA_MODEL §3.12 |
+| REQ-030 | Live leaderboard, ~1-minute refresh, DB-friendly at 300 users | 20 | REALTIME §6; DATA_MODEL §3.12 **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]** |
 | REQ-031 | Admin UI: leaderboard, status, My Teams, Add Teams, matrix with colours | 21, 22 | API_SPEC §5; AMB-13 |
-| REQ-032 | UFM: Reset score → 0 and the team continues (later points count from 0); Disqualify → −1201 and the team freezes; two-step, audited | 23 | STATE §5.9; SEC-09; DEC-04 |
+| REQ-032 | UFM: Reset score → 0 and the team continues (later points count from 0); Disqualify → −1201 and the team freezes; two-step, audited | 23 | STATE §5.9; SEC-09; DEC-04 **[B16: Changed: Penalise (Yes/No): official score 0 and the team frozen; no Reset, no Disqualify. See SCORING_AND_LEADERBOARD.md.]** |
 | REQ-033 | Fullscreen exit logs out that member and informs admin; progress kept | 25 | STATE §6; API_SPEC §3 |
 | REQ-034 | Crash/network recovery; debounced autosave; DB authoritative | 26 | ARCH §9; API_SPEC §4 (draft) |
 | REQ-035 | Global SETUP/RUNNING/PAUSED/ENDED designed into the timer engine | 27 | STATE §2 |

@@ -33,13 +33,16 @@ test.describe("participant home", () => {
       await expect(page.getByRole("img", { name: alt })).toBeVisible();
     }
     // B13: the numbers are the server's. The shared team entered the competition in global setup, so its team timer is
-    // running (just under 04:00:00) and it still holds the starting 500 coins; its rank and score are not published yet.
+    // running (just under 04:00:00) and it still holds the starting 500 coins. B16: its rank and score are the server's too.
     await expect(page.locator(".home-stats .stat-value").first()).toHaveText(/^0[34]:\d\d:\d\d$/);
-    await expect(page.getByText("500", { exact: true })).toBeVisible();
+    await expect(page.locator(".home-stats .stat-value").nth(1)).toHaveText("500");
     await expect(page.getByRole("heading", { name: "Live Leaderboard" })).toBeVisible();
-    await expect(page.getByLabel("Your rank")).toHaveText("—");
+    await expect(page.getByLabel("Your rank")).toHaveText(/^#\d+$/);
     await expect(page.getByLabel("Your team ID")).toHaveText(teamFor(info).code);
-    await expect(page.getByLabel("Your score")).toHaveText("—");
+    // 500 coins and nothing solved: 500 minus 5 per elapsed minute (the team started moments ago in global setup)
+    const score = Number(await page.getByLabel("Your score").innerText());
+    expect(score).toBeLessThanOrEqual(500);
+    expect(score).toBeGreaterThan(400);
     for (const name of [...ticketNames, "FINAL SUBMIT"]) {
       await expect(page.getByRole("button", { name })).toBeAttached();
     }

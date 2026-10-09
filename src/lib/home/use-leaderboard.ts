@@ -1,62 +1,76 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { createBoardPoller, type BoardPoller } from "./board-poller";
 import {
+  LEADERBOARD_JITTER,
   LEADERBOARD_REFRESH_MS,
-  rankEntries,
   type LeaderboardRow,
+  type LeaderboardSnapshot,
   type LeaderboardSource,
+  type RankedLine,
 } from "./leaderboard";
 
 export interface LeaderboardState {
+  /** The server's ranking, in the server's order. */
   rows: LeaderboardRow[];
+  /** The signed-in team's own line from the same snapshot; `null` before the first refresh. */
+  me: RankedLine | null;
   /** Epoch ms of the last successful refresh; `null` before the first one. */
   updatedAt: number | null;
   error: boolean;
 }
 
 /**
- * Polls `source` once on mount and then every `intervalMs` (default 1 minute).
- * Polling is the source of truth (realtime is only an enhancement): it pauses while the tab is hidden,
- * refreshes right away when the tab becomes visible and is stale, keeps the last good rows on failure,
- * and ignores responses that arrive after unmount.
+ * Polls `source` through `createBoardPoller` (15 s by default with +/- 20 % jitter, no overlapping requests, paused while
+ * the tab is hidden, backs off on failure). The rows are the server's, in the server's order; the last good rows stay on
+ * failure. `refreshKey` (the team's own state version) asks for a prompt, throttled refresh when it changes - a purchase,
+ * an approval becoming visible, a finished theme or a finalisation moves this team's score.
  */
 export function useLeaderboard(
   source: LeaderboardSource,
   intervalMs: number = LEADERBOARD_REFRESH_MS,
+  refreshKey?: number | null,
 ): LeaderboardState {
-  const [state, setState] = useState<LeaderboardState>({ rows: [], updatedAt: null, error: false });
+  const [state, setState] = useState<LeaderboardState>({
+    rows: [],
+    me: null,
+    updatedAt: null,
+    error: false,
+  });
+  const pollerRef = useRef<BoardPoller | null>(null);
+  const firstKey = useRef(true);
 
   useEffect(() => {
-    let alive = true;
-    let lastRun = 0;
-
-    const refresh = async () => {
-      lastRun = Date.now();
-      try {
-        const entries = await source();
-        if (alive) setState({ rows: rankEntries(entries), updatedAt: Date.now(), error: false });
-      } catch {
-        if (alive) setState((prev) => ({ ...prev, error: true }));
-      }
-    };
-
-    void refresh();
-    const timer = setInterval(() => {
-      if (!document.hidden) void refresh();
-    }, intervalMs);
-    const onVisibility = () => {
-      if (!document.hidden && Date.now() - lastRun >= intervalMs) void refresh();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-
+    const poller = createBoardPoller<LeaderboardSnapshot>({
+      load: source,
+      intervalMs,
+      jitter: LEADERBOARD_JITTER,
+      onData: (snapshot) =>
+        setState({
+          rows: snapshot.rows.map((r) => ({ rank: r.rank, teamId: r.teamId, score: r.score })),
+          me: snapshot.me,
+          updatedAt: Date.now(),
+          error: false,
+        }),
+      onError: () => setState((prev) => ({ ...prev, error: true })),
+    });
+    pollerRef.current = poller;
+    poller.start();
     return () => {
-      alive = false;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
+      pollerRef.current = null;
+      poller.stop();
     };
   }, [source, intervalMs]);
+
+  useEffect(() => {
+    if (firstKey.current) {
+      firstKey.current = false;
+      return;
+    }
+    if (refreshKey !== undefined && refreshKey !== null) pollerRef.current?.refreshSoon();
+  }, [refreshKey]);
 
   return state;
 }

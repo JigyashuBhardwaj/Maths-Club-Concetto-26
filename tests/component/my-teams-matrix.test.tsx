@@ -31,6 +31,7 @@ const board = (
       name: "The Euclids",
       status: "RUNNING",
       final_submitted: false,
+      ufm_penalized: false,
       members: [
         { slot: 1, presence: "ONLINE" },
         { slot: 2, presence: "OFFLINE" },

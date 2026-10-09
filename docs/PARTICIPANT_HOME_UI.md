@@ -21,6 +21,8 @@ Route: `/participant` (protected, B11). **Since Patch B13** the timer, coins, th
 | Theme dialog (name, description, "Unlock with N coins", "Explore other themes") | `theme-dialog.tsx`                                                                     |
 | Final dialog (heading, lorem, "Yes, submit", "Go back")                         | `final-submit-dialog.tsx`                                                              |
 
+> **B16.** The two rows above on the board ("refreshed every minute", ties) are superseded: the ranking is computed by the server from one snapshot and the board is polled every 15 s with jitter (pauses while the tab is hidden, no overlapping requests). See `SCORING_AND_LEADERBOARD.md`.
+
 ## Behaviour of the spiral
 
 CSS 3D helix; tickets always face the viewer. It drifts at 5°/s and eases to a stop on hover, keyboard focus, drag and while a dialog is open. It also responds to drag, wheel and arrow keys (Left/Right/Up/Down, Home, End); focusing a ticket brings it to the front. With `prefers-reduced-motion` there is no animation loop and every move is instant. No `backdrop-filter`/`filter` on tickets, so it stays light.

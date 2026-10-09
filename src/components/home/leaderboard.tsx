@@ -11,20 +11,27 @@ import {
 import { useLeaderboard } from "@/lib/home/use-leaderboard";
 
 interface LeaderboardProps {
-  /** The signed-in team's own line. Rank and score stay `null` until participants have a leaderboard snapshot (later patch). */
+  /**
+   * The signed-in team's own line BEFORE the first snapshot arrives (its Team ID is known from the session; rank and score
+   * are not). Once a snapshot is in, the server's own line replaces it.
+   */
   me: { rank: number | null; teamId: string; score: number | null };
-  /** Test seam; defaults to the empty source because no teams exist yet. */
+  /** The production source is `participantBoardSource`; the default is an empty board (tests, pre-login previews). */
   source?: LeaderboardSource;
   intervalMs?: number;
+  /** The team's own state version: a change refreshes the board at once (the team's score may have moved). */
+  refreshKey?: number | null;
 }
 
 export function Leaderboard({
-  me,
+  me: meFallback,
   source = emptyLeaderboardSource,
   intervalMs = LEADERBOARD_REFRESH_MS,
+  refreshKey,
 }: LeaderboardProps) {
-  const { rows } = useLeaderboard(source, intervalMs);
+  const { rows, me: snapshotMe } = useLeaderboard(source, intervalMs, refreshKey);
   const board = withPlaceholderRows(rows, MAX_TEAMS);
+  const me = snapshotMe ?? meFallback;
 
   return (
     <aside className="leaderboard" aria-labelledby="leaderboard-title">
@@ -32,7 +39,7 @@ export function Leaderboard({
         Live Leaderboard
       </h2>
 
-      <div className="lb-me" role="group" aria-label="Your team">
+      <div className="lb-me" role="group" aria-label="Your team" data-testid="lb-me">
         <span className="lb-cell lb-rank" aria-label="Your rank">
           {me.rank === null ? "—" : `#${me.rank}`}
         </span>

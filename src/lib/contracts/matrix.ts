@@ -28,6 +28,8 @@ export const matrixTeamSchema = z.object({
   name: z.string(),
   status: z.string(),
   final_submitted: z.boolean(),
+  /** B16: the UFM penalty has been applied (official score 0, team frozen). */
+  ufm_penalized: z.boolean(),
   members: z.array(z.object({ slot: z.number().int().min(1).max(4), presence: presenceSchema })),
   themes: z.array(
     z.object({

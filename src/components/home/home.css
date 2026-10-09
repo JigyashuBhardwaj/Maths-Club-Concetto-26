@@ -278,7 +278,7 @@
   background: linear-gradient(90deg, rgba(255, 106, 26, 0.16), rgba(255, 106, 26, 0.04));
   border: 1px solid rgba(255, 130, 60, 0.32);
   font-weight: 700;
-  font-size: clamp(13px, 1.1vw, 17px);
+  font-size: clamp(14px, 1.3vw, 20px);
   letter-spacing: 0.06em;
   font-variant-numeric: tabular-nums;
 }

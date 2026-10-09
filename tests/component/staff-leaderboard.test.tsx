@@ -13,8 +13,14 @@ const board = (r: unknown) =>
     new Response(JSON.stringify({ ok: true, data: { rows: r }, server_now: 1 }), { status: 200 }),
   );
 
-beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5); // centred jitter: exact intervals on the fake clock
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("<StaffLeaderboard />", () => {
   it("shows rank 1..N with Team_ID and Score, and no 'your team' row", () => {
@@ -56,7 +62,7 @@ describe("<StaffLeaderboard />", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Showing the last results");
     expect(screen.getByText("T2")).toBeInTheDocument(); // still the last good rows
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(2000); // after a failure the next wait doubles
     });
     expect(screen.getByText("T9")).toBeInTheDocument();
     expect(screen.queryByRole("status")).toBeNull();

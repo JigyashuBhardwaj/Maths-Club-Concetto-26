@@ -60,7 +60,7 @@ Claude workspace repo ──patch+notes──▶ human review ──apply──�
 ## 5. Database operations
 
 * **Migrations:** `supabase/migrations/NNNN_name.sql`, forward-only. Local: `supabase db reset` rebuilds from scratch and runs seeds; CI does the same and then runs the DB test suite.
-* **Scheduled jobs (`pg_cron`):** `expire_due_teams()` every 30 s; `refresh_leaderboard()` every 60 s; purge old `request_log` rows hourly. A health check reads `cron.job_run_details` and the Super Admin overview shows "sweeper last ran N s ago". If the sweeper stalls, lazy expiry still keeps rules correct; only idle-team finalisation and the leaderboard lag.
+* **Scheduled jobs (`pg_cron`):** `expire_due_teams()` every 30 s; `refresh_leaderboard()` every 60 s; purge old `request_log` rows hourly. A health check reads `cron.job_run_details` and the Super Admin overview shows "sweeper last ran N s ago". If the sweeper stalls, lazy expiry still keeps rules correct; only idle-team finalisation and the leaderboard lag. **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]**
 * **Seeds**
   * `npm run seed:content` — 10 themes (A–J), 50 questions, hints, reviewer keys. Idempotent; allowed everywhere; asserts counts.
   * `npm run seed:demo` — demo admins/teams; refuses unless `APP_ENV ∈ {development,test}` and the host is not the production project.

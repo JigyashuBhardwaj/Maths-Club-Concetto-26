@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { PenalizeDialog } from "@/components/admin/penalize-dialog";
 import { ThemeReviewDialog } from "@/components/admin/theme-review-dialog";
 import { THEME_CODES, type MatrixResult, type MatrixTeam } from "@/lib/contracts/matrix";
 import { fetchMatrix } from "@/lib/matrix/client";
@@ -30,7 +31,7 @@ interface Selected {
  * "My Teams": the Admin's live control board. One row per team the Admin owns (the server decides which; this component
  * only draws what it is given). M1..M4 show member presence (IN / OUT), A..J the ten theme cells (red = something to
  * review, green = all five questions approved), then Final Submit. Clicking a theme cell opens its five questions and,
- * from there, the submission review with Approve / Disapprove.
+ * from there, the submission review with Approve / Disapprove. Clicking a Team ID opens "Penalise this team" (UFM).
  *
  * The database is the only source of truth: the board is replaced wholesale by each answer and holds no game state of
  * its own. It re-reads on a short poll, when the tab becomes visible or focused, when the network returns and right
@@ -42,6 +43,7 @@ export function MyTeamsMatrix({ initial, fetchImpl, intervalMs = MATRIX_POLL_MS 
   const [reconnecting, setReconnecting] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [selected, setSelected] = useState<Selected | null>(null);
+  const [penalizing, setPenalizing] = useState<string | null>(null);
   const latest = useRef<MatrixResult | null>(initial);
   const inflight = useRef<Promise<void> | null>(null);
   const alive = useRef(true);
@@ -159,7 +161,22 @@ export function MyTeamsMatrix({ initial, fetchImpl, intervalMs = MATRIX_POLL_MS 
               {teams.map((team) => (
                 <tr key={team.id} data-team={team.team_code}>
                   <th scope="row" className="mx-team">
-                    {team.team_code}
+                    <button
+                      type="button"
+                      className="mx-team-btn"
+                      aria-haspopup="dialog"
+                      aria-label={`${team.team_code}: ${team.ufm_penalized ? "penalised, view" : "penalise this team"}`}
+                      title={team.ufm_penalized ? "Penalised" : "Penalise this team"}
+                      data-testid={`team-${team.team_code}`}
+                      onClick={() => setPenalizing(team.id)}
+                    >
+                      {team.team_code}
+                    </button>
+                    {team.ufm_penalized ? (
+                      <span className="mx-ufm" data-testid={`ufm-${team.team_code}`}>
+                        Penalised
+                      </span>
+                    ) : null}
                     <span className="mx-name" title={team.name}>
                       {team.name}
                     </span>
@@ -244,6 +261,16 @@ export function MyTeamsMatrix({ initial, fetchImpl, intervalMs = MATRIX_POLL_MS 
         {data?.presence_timeout_seconds ?? 75} s without a sign of life). Red: a submission is
         waiting for you. Green: all five questions of the theme are approved.
       </p>
+
+      {penalizing && teams.find((t) => t.id === penalizing) ? (
+        <PenalizeDialog
+          key={penalizing}
+          team={teams.find((t) => t.id === penalizing)!}
+          fetchImpl={fetchImpl}
+          onChanged={() => void refresh()}
+          onClose={() => setPenalizing(null)}
+        />
+      ) : null}
 
       {selected ? (
         <ThemeReviewDialog

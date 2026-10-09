@@ -46,6 +46,7 @@ const matrix = () => ({
       name: "Team Seventeen",
       status: "RUNNING",
       final_submitted: false,
+      ufm_penalized: false,
       members: [
         { slot: 1, presence: "ONLINE" },
         { slot: 2, presence: "OFFLINE" },

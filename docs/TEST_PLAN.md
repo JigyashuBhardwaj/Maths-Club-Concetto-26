@@ -30,7 +30,7 @@ Test data is created by the tests themselves (never the demo seed in production)
 | INV-09 | Exactly one Super Admin |
 | INV-10 | Update/delete on `audit_events` fails |
 | INV-11 | A team owns Tier 2 of a question only if it owns Tier 1 |
-| INV-12 | Official score = override (Disqualified only) else baseline-adjusted (floored at −1200) else raw; reset columns both set or both null |
+| INV-12 | Official score = override (Disqualified only) else baseline-adjusted (floored at −1200) else raw; reset columns both set or both null **[B16: Changed in B16. See SCORING_AND_LEADERBOARD.md.]** |
 
 A single `check_invariants()` SQL function runs all of them and is called by tests, by the load-test teardown, and as a pre-event check.
 
@@ -107,7 +107,7 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 | RT-03 | Approval propagates to all four members |
 | RT-04 | Admin sees a new pending submission without refresh |
 | RT-05 | Admin sees member online/offline change (join, close tab, kill network) |
-| RT-06 | Leaderboard updates within ~60 s of a score change |
+| RT-06 | Leaderboard updates within ~60 s of a score change **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]** |
 | RT-07 | Realtime disabled entirely (block WebSocket) → UI still converges via poll within 15 s |
 | RT-08 | Missed/duplicated/out-of-order pings do not corrupt UI (version rule) |
 
@@ -135,8 +135,8 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 | AD-07 | Create team: validation (password match, duplicates of team ID/login/admission numbers); auto-assigned to creator; 500 coins |
 | AD-08 | Two admins (or admin + Super Admin) review one submission → one succeeds, other `SUBMISSION_NOT_PENDING` |
 | AD-09 | Super Admin creates/disables admins; disabled admin's sessions die immediately |
-| AD-10 | UFM Reset: score reads 0, `team.status` stays `RUNNING`, timers keep running, the team can still unlock/submit and be reviewed; audit holds previous score, raw score and baseline |
-| AD-11 | UFM Disqualify: score reads −1201, status `DISQUALIFIED`, every later mutation rejected; a Reset followed by a Disqualify ends at −1201 |
+| AD-10 | UFM Reset: score reads 0, `team.status` stays `RUNNING`, timers keep running, the team can still unlock/submit and be reviewed; audit holds previous score, raw score and baseline **[B16: Replaced by supabase/tests/160_ufm_penalty.test.sql. See SCORING_AND_LEADERBOARD.md.]** |
+| AD-11 | UFM Disqualify: score reads −1201, status `DISQUALIFIED`, every later mutation rejected; a Reset followed by a Disqualify ends at −1201 **[B16: Not built; replaced by the penalty (160). See SCORING_AND_LEADERBOARD.md.]** |
 
 ### 3.7 Scoring (SC)
 
@@ -145,10 +145,10 @@ A single `check_invariants()` SQL function runs all of them and is called by tes
 | SC-01 | Formula: `themes×500 + solved×100 + coins − minutes×5` on hand-computed fixtures |
 | SC-02 | Minutes taken uses the floor of remaining minutes; boundaries 0:00, 0:59, 1:00, 120:00 |
 | SC-03 | Score freezes at `ended_at` for final-submitted and ended teams |
-| SC-04 | Disqualify override is exactly −1201; the minimum natural score (−1200) is above −1201 |
+| SC-04 | Disqualify override is exactly −1201; the minimum natural score (−1200) is above −1201 **[B16: Not applicable: no Disqualify override. See SCORING_AND_LEADERBOARD.md.]** |
 | SC-07 | Reset baseline: score 850 → Reset → 0 → earn 100 (approval) → 100; the time penalty and purchases keep applying after the Reset |
 | SC-08 | Reset floor: a reset team whose raw score falls far below its baseline never scores below −1200 |
-| SC-09 | Second Reset re-zeroes from the then-current raw score; Reset then Disqualify → −1201 and the baseline is retained |
+| SC-09 | Second Reset re-zeroes from the then-current raw score; Reset then Disqualify → −1201 and the baseline is retained **[B16: Not applicable: no Reset. See SCORING_AND_LEADERBOARD.md.]** |
 | SC-05 | TypeScript display formula equals the SQL function on 1,000 random states (parity test) |
 | SC-06 | Not-started teams excluded from the leaderboard; tie-break order stable |
 

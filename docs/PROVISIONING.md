@@ -78,7 +78,7 @@ no database text, hash, token or stack trace is returned.
 | `GET /api/admin/teams`   | -                                                                                      | `{teams: [{id, team_code, name, login_id, status, member_count, created_at}]}`     |
 | `GET /api/leaderboard`   | -                                                                                      | `{rows: [{rank, team_id, score}]}`                                                 |
 
-`team_id` in the leaderboard is the human Team ID (`team_code`). Score is `score_override`, else `final_score`, else 0;
+`team_id` in the leaderboard is the human Team ID (`team_code`). Score is `score_override`, else `final_score`, else 0; **[B16: Since B16 the score is the derived official score (`app.team_scores`). See SCORING_AND_LEADERBOARD.md.]**
 ties are ordered by the shorter final time, then Team ID. The board lists **every** team (rank 1 to N).
 
 ## 4. User interface
@@ -93,7 +93,7 @@ ties are ordered by the shorter final time, then Team ID. The board lists **ever
   after an unknown outcome (network failure, 5xx), so a request that did succeed is replayed instead of repeated.
 - Messages are fixed wording chosen by the error code; server text is never displayed. Passwords are cleared after a
   success and never stored in the browser (no `localStorage` / `sessionStorage`).
-- The leaderboard refreshes every 60 s while the tab is visible and keeps the last good rows if a refresh fails.
+- The leaderboard refreshes every 60 s while the tab is visible and keeps the last good rows if a refresh fails. **[B16: the leaderboard is a derived read (no snapshot table, no cron refresh), polled every 15 s with jitter. See SCORING_AND_LEADERBOARD.md.]**
 
 ## 5. Tests
 

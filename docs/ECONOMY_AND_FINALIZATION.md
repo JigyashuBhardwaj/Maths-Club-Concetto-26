@@ -15,7 +15,7 @@ reference for B15; the older documents carry short pointers to it.
 | Final Submit          | The team ends its own run. Same terminal freeze as the timer reaching zero, status `FINAL_SUBMITTED`.                                                                                                                             |
 | Data-driven           | Prices, rewards and durations are read from the tables. No price, reward or timer length is hard-coded in `src/` apart from the one shared default `TEAM_TIMER_SECONDS` (a test guards this).                                     |
 
-Not in B15 (B16 owns them): scoring, final minutes, leaderboard ranking, Admin penalties, the Reset/UFM score. B15
+Not in B15 (B16 owns them): scoring, final minutes, leaderboard ranking, Admin penalties, the Reset/UFM score. B15 **[B16: Delivered in B16. See SCORING_AND_LEADERBOARD.md.]**
 only **preserves** `started_at`, `ends_at`, `ended_at`, `final_submitted_at`, `final_submitted_by`, `timer_seconds` and
 `competition.ultimate_seconds` so B16 can compute from them. Also untouched: the B16 question "240 vs per-team
 allowance" (what 240 means for a 2 h team); B15 does not decide it.

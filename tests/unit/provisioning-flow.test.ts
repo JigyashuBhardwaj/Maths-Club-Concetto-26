@@ -300,14 +300,15 @@ describe("authorisation (server-side, by the session's role)", () => {
     await t.createAdmin(post("/api/super/admins", adminBody, root));
     const alice = await staffCookie(t, "alice", "alice-password-1");
     await t.createTeam(post("/api/admin/teams", teamBody, alice));
-    t.backend.controls.setScore({ code: "T1", score: 250 });
+    // B16: the score is derived (a team that has not started shows its coins), so the test sets the balance
+    t.backend.controls.setCoins({ loginId: teamBody.loginId, coins: 750 });
     for (const cookie of [root, alice]) {
       const res = await t.leaderboard(get("/api/leaderboard", cookie));
       expect(res.status).toBe(200);
       const text = await res.text();
       expect(JSON.parse(text).data.rows).toEqual([
-        { rank: 1, team_id: "T1", score: 250 },
-        { rank: 2, team_id: "OLD1", score: 0 },
+        { rank: 1, team_id: "T1", score: 750 },
+        { rank: 2, team_id: "OLD1", score: 500 },
       ]);
       for (const secret of ["euclids", "23JE", "password", "hash", "The Euclids"]) {
         expect(text).not.toContain(secret);

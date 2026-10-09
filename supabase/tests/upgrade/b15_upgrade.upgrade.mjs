@@ -48,7 +48,7 @@ const migrations = readdirSync(join(root, "supabase/migrations"))
   .filter((f) => f.endsWith(".sql"))
   .sort();
 const B15 = migrations.filter((f) => /^2026100600001[67]_/.test(f));
-const B14 = migrations.filter((f) => !B15.includes(f));
+const B14 = migrations.filter((f) => !B15.includes(f) && f < "20261006000016"); // later migrations (B16+) are not part of this baseline
 assert.equal(B15.length, 2, "the two B15 migrations");
 assert.equal(B14.length, 15, "fifteen migrations existed at the B14 baseline");
 

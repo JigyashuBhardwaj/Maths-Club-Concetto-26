@@ -104,8 +104,10 @@ begin
   assert t.ends_at = (select ends_at from pre) and t.timer_seconds = 14400, 'the schedule itself is not rewritten';
   assert t.coins = (select coins from pre) and (select count(*) from coin_transactions where team_id = t.id) = (select ledger from pre), 'no coin moved';
   assert t.state_version = (select v from pre) + 1;
-  assert t.final_score is null and t.final_completed_themes is null and t.final_solved_questions is null and t.final_minutes_taken is null,
-         'scores are B16: nothing is computed here';
+  -- B16: the gameplay score is frozen at this very instant (the full matrix is in 150_scoring.test.sql)
+  assert t.final_minutes_taken = 60 and t.final_score is not null and t.final_completed_themes is not null and t.final_solved_questions is not null,
+         'B16 froze the score at the terminal moment: 13:00 is 60 minutes into a 4 h allowance';
+  assert t.final_score = app.compute_score(t.final_completed_themes, t.final_solved_questions, t.coins, 60), 'the frozen score follows the formula';
   s := j->'state';
   assert s->'team'->>'status' = 'FINAL_SUBMITTED' and (s->'team'->>'frozen')::boolean and not (s->'team'->>'expired')::boolean;
   assert (s->'team'->>'remaining_seconds')::int = 10800, '16:00 - 13:00, frozen';

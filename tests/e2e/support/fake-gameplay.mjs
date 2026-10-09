@@ -92,6 +92,7 @@ export function createGameplay({
       timerSeconds: null, // the per-team allowance snapshot (teams.timer_seconds)
       endedAt: null,
       finalSubmittedAt: null,
+      final: null, // B16: the gameplay score frozen at the terminal moment (teams.final_*)
       hints: new Set(), // "questionId:tier" the team owns
       ledger: [], // { type, amount, qid } of the spends this module made
       pausedAt: null,
@@ -320,6 +321,54 @@ export function createGameplay({
     return out;
   }
 
+  // ---- B16 scoring (the SQL's app.team_scores / app.freeze_final_score; keep the two in step) --------------------------
+  const SCORE = { theme: 500, question: 100, minute: 5 };
+  const TERMINAL = ["FINAL_SUBMITTED", "ENDED", "DISQUALIFIED"];
+  /** score = completed x 500 + solved x 100 + coins - minutes x 5; minutes = round((allowance - remaining) / 60), half up. */
+  function scoreParts(t, n) {
+    const g = game(t);
+    if (g.final) return { ...g.final, frozen: true };
+    let solved = 0;
+    let completed = 0;
+    for (const th of THEMES) {
+      const approved = QUESTIONS.filter(
+        (q) => q.themeId === th.id && g.questions.get(q.id)?.state === "APPROVED",
+      ).length;
+      solved += approved;
+      if (approved === 5) completed += 1;
+    }
+    let minutes = 0;
+    if (g.startedAt !== null) {
+      const allowance = g.timerSeconds ?? DURATION_S;
+      const remaining = Math.max(0, Math.min(allowance, (g.endsAt - teamClock(t, n)) / 1000));
+      minutes = Math.floor((allowance - remaining) / 60 + 0.5);
+    }
+    const score =
+      completed * SCORE.theme + solved * SCORE.question + g.coins - minutes * SCORE.minute;
+    return { completed, solved, minutes, score, frozen: false };
+  }
+  /** Writes the gameplay score once, for a terminal team (the SQL's freeze_final_score). */
+  function freeze(t, n) {
+    const g = game(t);
+    if (g.final || !TERMINAL.includes(t.status)) return;
+    const { completed, solved, minutes, score } = scoreParts(t, n);
+    g.final = { completed, solved, minutes, score };
+  }
+  const officialScore = (t, n) => (t.ufmPenalizedAt ? 0 : scoreParts(t, n).score);
+  /** app.leaderboard_rows: started teams first, then score desc, minutes asc, Team ID asc (code point). */
+  function leaderboardRows(n) {
+    return teamList()
+      .map((t) => ({ t, score: officialScore(t, n), minutes: scoreParts(t, n).minutes }))
+      .sort(
+        (x, y) =>
+          Number(x.t.status === "NOT_STARTED") - Number(y.t.status === "NOT_STARTED") ||
+          y.score - x.score ||
+          x.minutes - y.minutes ||
+          (x.t.code < y.t.code ? -1 : x.t.code > y.t.code ? 1 : 0),
+      )
+      .map((x, i) => ({ rank: i + 1, team_id: x.t.code, score: x.score, id: x.t.id }));
+  }
+
   /** finalize_team_if_due / expire_due_teams: RUNNING -> ENDED at the team's own end, only while the competition runs. */
   function finalizeIfDue(t, n) {
     const g = game(t);
@@ -334,6 +383,7 @@ export function createGameplay({
     }
     t.status = "ENDED";
     g.endedAt = g.endsAt;
+    freeze(t, n);
     bump(g);
     audit.push({ type: "TEAM_ENDED", teamId: t.id });
     return true;
@@ -680,6 +730,7 @@ export function createGameplay({
       t.status = "FINAL_SUBMITTED";
       g.endedAt = n;
       g.finalSubmittedAt = n;
+      freeze(t, n);
       bump(g);
       audit.push({ type: "TEAM_FINAL_SUBMITTED", teamId: t.id, memberId: m.id });
       const res = { replayed: false, state: teamState(t, m, n) };
@@ -713,6 +764,81 @@ export function createGameplay({
     disapprove_submission(a) {
       return review(a, "disapprove");
     },
+  };
+
+  // ---- B16: leaderboard and UFM penalty (migration 18) ------------------------------------------------------------
+  fns.get_leaderboard = (a) => {
+    const staff = staffById(a.p_staff_id);
+    if (!staff || !staff.active || !["ADMIN", "SUPER_ADMIN"].includes(staff.role))
+      throw fail("FORBIDDEN");
+    const n = now();
+    return {
+      server_now: n,
+      rows: leaderboardRows(n).map(({ rank, team_id, score }) => ({ rank, team_id, score })),
+    };
+  };
+  fns.get_team_leaderboard = (a) => {
+    const { t } = assertMember(a.p_team_id, a.p_member_id);
+    const n = now();
+    const rows = leaderboardRows(n);
+    const mine = rows.find((r) => r.id === t.id);
+    return {
+      server_now: n,
+      rows: rows.map(({ rank, team_id, score }) => ({ rank, team_id, score })),
+      me: mine ? { rank: mine.rank, team_id: mine.team_id, score: mine.score } : null,
+    };
+  };
+  fns.penalize_team = (a) => {
+    const t = requireOwnerAdmin(a.p_staff_id, a.p_team_id);
+    needKey(a.p_idem_key);
+    const f = fp("team", t.id);
+    const replay = idemLookup(a.p_staff_id, a.p_idem_key, "penalize_team", f);
+    if (replay) return { ...replay, replayed: true };
+    const g = game(t);
+    const n = now();
+    let changed = false;
+    if (!t.ufmPenalizedAt) {
+      if (t.status === "NOT_STARTED") throw fail("TEAM_NOT_STARTED");
+      const previous = t.status;
+      if (t.status === "RUNNING") {
+        // app.expire_team at the team clock (the pause instant while paused), then the score is frozen
+        const end = Math.min(g.endsAt, teamClock(t, n));
+        for (const q of g.questions.values()) {
+          if (q.state === "ACTIVE" && q.deadline <= end) {
+            q.state = "TIMED_OUT";
+            q.timedOutAt = q.deadline;
+            q.deadline = null;
+          }
+        }
+        t.status = "ENDED";
+        g.endedAt = end;
+        freeze(t, n);
+        audit.push({ type: "TEAM_ENDED", teamId: t.id });
+      }
+      t.ufmPenalizedAt = n;
+      bump(g);
+      audit.push({
+        type: "UFM_PENALIZED",
+        teamId: t.id,
+        staffId: a.p_staff_id,
+        previous,
+        gameplayScore: scoreParts(t, n).score,
+      });
+      changed = true;
+    }
+    const res = {
+      replayed: false,
+      changed,
+      team: {
+        id: t.id,
+        team_code: t.code,
+        status: t.status,
+        official_score: 0,
+        penalized_at: t.ufmPenalizedAt,
+      },
+    };
+    idemStore(a.p_staff_id, a.p_idem_key, "penalize_team", f, res);
+    return res;
   };
 
   // ---- Admin "My Teams" matrix (migration 15) -------------------------------------------------------------------
@@ -749,6 +875,7 @@ export function createGameplay({
           name: t.name,
           status: t.status,
           final_submitted: t.status === "FINAL_SUBMITTED",
+          ufm_penalized: Boolean(t.ufmPenalizedAt),
           members: [...t.members]
             .sort((x, y) => x.slot - y.slot)
             .map((m) => ({ slot: m.slot, presence: isOnline(m) ? "ONLINE" : "OFFLINE" })),
@@ -842,6 +969,8 @@ export function createGameplay({
     if (owner.competition === "PAUSED") throw fail("COMPETITION_PAUSED");
     if (owner.competition !== "RUNNING") throw fail("COMPETITION_NOT_RUNNING");
     if (sub.status !== "PENDING") throw fail("SUBMISSION_NOT_PENDING");
+    // B16: an approval that finds an expired, not yet persisted team ends it at its end first (which freezes the score)
+    if (action === "approve") finalizeIfDue(owner, n);
     const g = game(owner);
     const row = g.questions.get(sub.qid);
     const qq = QUESTIONS.find((x) => x.id === sub.qid);
@@ -937,6 +1066,13 @@ export function createGameplay({
       }
       return { endsAt: g.endsAt };
     },
+    /** Test-only: sets a team's coin balance (the score is derived from it; there is no stored score any more). */
+    setCoins({ loginId, coins }) {
+      const t = teams.get(String(loginId).toLowerCase());
+      if (!t) throw new AppError("unknown team");
+      game(t).coins = Number(coins);
+      return { ok: true };
+    },
     /** Test-only: gives a started team the allowance a pre-B15 team was given (seconds), keeping `started_at`. */
     legacyTimer({ loginId, seconds }) {
       const t = teams.get(String(loginId).toLowerCase());
@@ -962,6 +1098,9 @@ export function createGameplay({
         endedAt: g.endedAt,
         finalSubmittedAt: g.finalSubmittedAt,
         timerSeconds: g.timerSeconds,
+        final: g.final,
+        penalizedAt: t.ufmPenalizedAt ?? null,
+        score: officialScore(t, now()),
         hints: [...g.hints],
         ledger: g.ledger,
         themes: [...g.themes.keys()],

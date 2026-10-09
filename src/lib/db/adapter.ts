@@ -17,6 +17,8 @@ export type DbFunction =
   | "create_team"
   | "list_admin_teams"
   | "get_leaderboard"
+  | "get_team_leaderboard"
+  | "penalize_team"
   | "unlock_theme"
   | "start_question"
   | "get_question_for_team"

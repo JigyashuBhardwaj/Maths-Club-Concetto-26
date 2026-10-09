@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { leaderboardResultSchema, type LeaderboardResult } from "@/lib/contracts/provisioning";
-import { LEADERBOARD_REFRESH_MS } from "@/lib/home/leaderboard";
+import { createBoardPoller } from "@/lib/home/board-poller";
+import { LEADERBOARD_JITTER, LEADERBOARD_REFRESH_MS } from "@/lib/home/leaderboard";
 
 type Rows = LeaderboardResult["rows"];
 
@@ -30,8 +31,9 @@ async function fetchRows(fetchImpl: typeof fetch): Promise<Rows> {
 
 /**
  * The Admin / Super Admin live leaderboard: rank 1 to the number of teams, Team ID and Score. It is the same board for
- * every staff member and has no "your team" row (a staff member has no team). It refreshes once a minute while the tab is
- * visible, keeps the last good rows if a refresh fails, and holds only what the server returned for this request.
+ * every staff member and has no "your team" row (a staff member has no team). It refreshes through the shared poller (15 s,
+ * jittered, never overlapping, paused while the tab is hidden), keeps the last good rows if a refresh fails, and holds only
+ * what the server returned for this request.
  */
 export function StaffLeaderboard({
   initialRows,
@@ -42,36 +44,21 @@ export function StaffLeaderboard({
   const [stale, setStale] = useState(false);
 
   useEffect(() => {
-    let alive = true;
-    let lastRun = initialRows === null ? 0 : Date.now();
     const doFetch = fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
-
-    const refresh = async () => {
-      lastRun = Date.now();
-      try {
-        const next = await fetchRows(doFetch);
-        if (alive) {
-          setRows(next);
-          setStale(false);
-        }
-      } catch {
-        if (alive) setStale(true);
-      }
-    };
-
-    if (initialRows === null) void refresh();
-    const timer = setInterval(() => {
-      if (!document.hidden) void refresh();
-    }, intervalMs);
-    const onVisibility = () => {
-      if (!document.hidden && Date.now() - lastRun >= intervalMs) void refresh();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
+    const poller = createBoardPoller<Rows>({
+      load: () => fetchRows(doFetch),
+      intervalMs,
+      jitter: LEADERBOARD_JITTER,
+      // the server rendered the first paint: the first refresh is one (jittered) interval away
+      immediate: initialRows === null,
+      onData: (next) => {
+        setRows(next);
+        setStale(false);
+      },
+      onError: () => setStale(true),
+    });
+    poller.start();
+    return () => poller.stop();
   }, [initialRows, intervalMs, fetchImpl]);
 
   return (

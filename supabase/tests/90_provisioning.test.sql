@@ -243,19 +243,29 @@ begin
   assert (public.get_team_state(tid, (select id from team_members where team_id = tid and slot = 1))->'me'->>'team_code') = 'T10', 'its own team is readable';
 end $$;
 
--- ===== 8. leaderboard =================================================================================================
-update teams set final_score = 700, final_minutes_taken = 30 where team_code = 'T01';
-update teams set final_score = 700, final_minutes_taken = 20 where team_code = 'T02';
-update teams set score_override = -1201, status = 'DISQUALIFIED', started_at = now(), timer_seconds = 14400, ended_at = now() where team_code = 'T20';
+-- ===== 8. leaderboard (B16: derived score; started teams first, NOT_STARTED last; deterministic order) ===============
+-- T01 / T02 are ended with a frozen score; T20 is disqualified; T10 has not started.
+update teams set status = 'ENDED', started_at = now() - interval '1 hour', timer_seconds = 14400, ends_at = now() + interval '3 hours',
+                 ended_at = now() - interval '30 minutes',
+                 final_score = 700, final_completed_themes = 1, final_solved_questions = 2, final_minutes_taken = 30
+ where team_code = 'T01';
+update teams set status = 'ENDED', started_at = now() - interval '1 hour', timer_seconds = 14400, ends_at = now() + interval '3 hours',
+                 ended_at = now() - interval '40 minutes',
+                 final_score = 700, final_completed_themes = 1, final_solved_questions = 2, final_minutes_taken = 20
+ where team_code = 'T02';
+update teams set score_override = -1201, status = 'DISQUALIFIED', started_at = now(), timer_seconds = 14400, ended_at = now(),
+                 final_score = 0, final_completed_themes = 0, final_solved_questions = 0, final_minutes_taken = 0
+ where team_code = 'T20';
 do $$
 declare lb jsonb := public.get_leaderboard('00000000-0000-0000-0000-0000000000a1'); lb2 jsonb := public.get_leaderboard(pg_temp.a2());
 begin
-  assert lb = lb2, 'the board is the same for every staff member';
-  assert (select array_agg(x->>'team_id' order by (x->>'rank')::int) from jsonb_array_elements(lb->'rows') x) = array['T02', 'T01', 'T10', 'T20'],
-         'score desc, fewer minutes first, disqualified last: ' || lb::text;
+  assert (lb - 'server_now') = (lb2 - 'server_now'), 'the board is the same for every staff member';
+  assert (select array_agg(x->>'team_id' order by (x->>'rank')::int) from jsonb_array_elements(lb->'rows') x) = array['T02', 'T01', 'T20', 'T10'],
+         'score desc, fewer minutes first, disqualified below the others, the unstarted team last: ' || lb::text;
   assert (select array_agg((x->>'rank')::int order by (x->>'rank')::int) from jsonb_array_elements(lb->'rows') x) = array[1, 2, 3, 4], 'ranks 1..N over all teams';
-  assert (select array_agg((x->>'score')::int order by (x->>'rank')::int) from jsonb_array_elements(lb->'rows') x) = array[700, 700, 0, -1201];
-  assert pg_temp.keys_of(lb) = array['rank', 'rows', 'score', 'team_id'], 'only rank, team code and score: ' || pg_temp.keys_of(lb)::text;
+  assert (select array_agg((x->>'score')::int order by (x->>'rank')::int) from jsonb_array_elements(lb->'rows') x) = array[700, 700, -1201, 500],
+         'a team that has not started shows the formula score (its coins): ' || lb::text;
+  assert pg_temp.keys_of(lb) = array['rank', 'rows', 'score', 'server_now', 'team_id'], 'only rank, team code and score (+ server_now): ' || pg_temp.keys_of(lb)::text;
 end $$;
 select pg_temp.rejects($s$select public.get_leaderboard(gen_random_uuid())$s$, 'FORBIDDEN');
 select pg_temp.rejects($s$select public.get_leaderboard(null)$s$, 'FORBIDDEN');

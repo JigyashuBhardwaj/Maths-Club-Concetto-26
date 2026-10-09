@@ -188,6 +188,12 @@ export async function inspect(team: E2ETeam): Promise<{
   endedAt: number | null;
   finalSubmittedAt: number | null;
   timerSeconds: number | null;
+  /** The frozen gameplay score parts (B16), or null while the team is still playing. */
+  final: { completed: number; solved: number; minutes: number; score: number } | null;
+  /** When the UFM penalty was applied, or null. */
+  penalizedAt: number | null;
+  /** The OFFICIAL score now (0 when penalised). */
+  score: number;
   hints: string[];
   ledger: { type: string; amount: number; qid: number }[];
   themes: number[];

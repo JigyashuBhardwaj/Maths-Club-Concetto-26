@@ -117,11 +117,12 @@ test.describe("the central slice: Super Admin → Admin → Team → participant
     await page.goto("/admin/teams");
     await expect(page.getByRole("row", { name: new RegExp(t1.teamCode) })).toBeVisible();
 
-    // The leaderboard of the Admin home lists every team, with a rank and a score.
+    // The leaderboard of the Admin home lists every team, with a rank and a score (B16: a team that has not started shows
+    // the formula's 500, ranked after every team that has).
     await page.goto("/admin");
     const board = page.getByRole("table");
     await expect(
-      board.getByRole("row", { name: new RegExp(`#\\d+\\s*${t1.teamCode}\\s*0`) }),
+      board.getByRole("row", { name: new RegExp(`#\\d+\\s*${t1.teamCode}\\s*500`) }),
     ).toBeVisible();
 
     // A participant signs in with T1's credentials and M1's admission number.

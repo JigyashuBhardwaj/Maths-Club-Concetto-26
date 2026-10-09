@@ -94,8 +94,8 @@ While `PAUSED`: all participant mutations return `COMPETITION_PAUSED`; admin rev
 | NOT_STARTED | `start_team_competition` | the first member to **enter the competition interface**: the client calls it only after the member has acknowledged the rules and completed the fullscreen acknowledgement. Login never calls it | competition `RUNNING` | `status='RUNNING'`, `started_at=now`, `timer_seconds=competition.ultimate_seconds` (**B15: 14400**; 7200 before), `ends_at=now+timer_seconds`; coins already 500 from creation; audit `TEAM_STARTED`. Exactly-once: guarded by the status check under the team lock, so two members entering together start the clock once; later members, re-logins and re-entering fullscreen never restart it. |
 | RUNNING | `final_submit` | any member | none pending-blocking (see `DEC-03`) | §5.8 |
 | RUNNING | auto-end | system (lazy or sweeper) | `now >= ends_at` | §5.4 |
-| RUNNING | `disqualify_team` | assigned admin / super admin | two-step confirmation | `status='DISQUALIFIED'`, `ended_at=now`, `score_override=-1201`. The team is frozen and every later mutation is rejected. |
-| RUNNING | `reset_score` | assigned admin / super admin | two-step confirmation | `score_reset_at=now`, `score_reset_baseline = raw score now`, so the official score becomes 0 and later points count from 0. **`status` stays `RUNNING`: the team continues** (timers, coins, questions, submissions and reviews are untouched). A repeat Reset re-zeroes from the then-current raw score. See `DEC-04` |
+| RUNNING | `disqualify_team` | assigned admin / super admin | two-step confirmation | `status='DISQUALIFIED'`, `ended_at=now`, `score_override=-1201`. The team is frozen and every later mutation is rejected. **[B16: Disqualify (−1201) is not built; the UFM penalty replaces it. See SCORING_AND_LEADERBOARD.md.]** |
+| RUNNING | `reset_score` | assigned admin / super admin | two-step confirmation | `score_reset_at=now`, `score_reset_baseline = raw score now`, so the official score becomes 0 and later points count from 0. **`status` stays `RUNNING`: the team continues** (timers, coins, questions, submissions and reviews are untouched). A repeat Reset re-zeroes from the then-current raw score. See `DEC-04` **[B16: Superseded: UFM is now `penalize_team` (official score 0 and the team is frozen), not a baseline reset. See SCORING_AND_LEADERBOARD.md.]** |
 | any terminal | anything else | — | — | rejected with `ALREADY_SUBMITTED` / `TEAM_ENDED` |
 
 **Expired but not yet ended (B10 decision).** Until the sweeper and lazy expiry exist (B12), a `RUNNING` team whose `ends_at` has passed keeps `status = 'RUNNING'` in the database. `get_team_state` is a pure read: it reports `remaining_seconds = 0` and `expired = true`, never resets or extends the timer, and never writes. The transition to `ENDED` happens only through `expire_team`, called by the competition `resume` (for a team already past its end at the pause) and `end` operations. The remaining time is always derived, never stored.
@@ -181,7 +181,7 @@ Not on the brief's list; added by the locked rule that a question timer starts w
 1. Idempotent: if the team is already terminal, return.
 2. For `ACTIVE` questions with `timer_deadline <= ends_at`, mark `TIMED_OUT`.
 3. `status='ENDED'`, `ended_at = ends_at` (the *scheduled* end, not the time the sweeper ran).
-4. Cache `final_*` via `compute_team_score`. Member sessions are **not** revoked: students stay logged in to see their result and log out themselves (brief §18).
+4. Cache `final_*` via `compute_team_score`. Member sessions are **not** revoked: students stay logged in to see their result and log out themselves (brief §18). **[B16: The frozen score comes from `app.freeze_final_score` (minutes = elapsed). See SCORING_AND_LEADERBOARD.md.]**
 5. Audit `TEAM_ENDED(reason=TIMER)`; ping `team:{id}` and `admin:{admin_id}`.
 
 The sweeper runs `expire_due_teams()` which calls `expire_team` for every `RUNNING` team with `ends_at <= now`, using `FOR UPDATE SKIP LOCKED` so it never queues behind live traffic. **B15:** it is invoked by a Vercel Cron route (`GET /api/cron/expire-teams`), not by `pg_cron`, and only as a safety net: `finalize_team_if_due` runs lazily on every read and after every refused action, which is the primary path. `ended_at` is the team's `ends_at` either way.
@@ -221,11 +221,11 @@ Common: caller is the assigned admin or the Super Admin (`DEC-06`). Find the tea
 ### 5.8 `finalSubmit` (`final_submit`)
 1. Preamble. If the team is already `FINAL_SUBMITTED` → return the stored result with code `ALREADY_SUBMITTED` ("Team already submitted."); concurrent callers serialise on the team lock, so exactly one wins and the rest receive that code.
 2. `status='FINAL_SUBMITTED'`, `ended_at = now`, `final_submitted_at`, `final_submitted_by`.
-3. Cache `final_*` from `compute_team_score` (frozen clock).
-4. Pending submissions: handled per `DEC-03` (default: stay reviewable; reward and score update on review).
+3. Cache `final_*` from `compute_team_score` (frozen clock). **[B16: The frozen score comes from `app.freeze_final_score`. See SCORING_AND_LEADERBOARD.md.]**
+4. Pending submissions: handled per `DEC-03` (default: stay reviewable; reward and score update on review). **[B16: Late approvals still pay coins; they never change the frozen score. See SCORING_AND_LEADERBOARD.md.]**
 5. Audit `TEAM_FINAL_SUBMITTED`; ping team, admin and `global`.
 
-### 5.9 `resetScore` / `disqualifyTeam` (UFM)
+### 5.9 `resetScore` / `disqualifyTeam` (UFM) **[B16: Replaced: only `penalize_team` exists (owner Admin, official score 0, team frozen); Reset and Disqualify are not built. See SCORING_AND_LEADERBOARD.md.]**
 1. Two server-side steps: `prepare` creates a `ufm_challenges` row (60 s expiry, bound to staff+team+action); `confirm` consumes it (`used_at`). A direct call without a fresh challenge fails.
 2. Caller is the assigned admin or the Super Admin.
 3. Lock team, then by action:
@@ -271,7 +271,7 @@ Presence never influences competition state (brief §24).
 | Two members unlock the same theme simultaneously | Second waits on the team lock, sees the row, gets `THEME_ALREADY_UNLOCKED`, no charge |
 | Two members enter the same `AVAILABLE` question together | The first activates it; the second sees it already `ACTIVE`; both receive the same authoritative deadline and the timer starts exactly once |
 | Two members enter the competition together | One starts the team timer; the other receives the existing times |
-| Admin presses Reset while the team is mid-answer | Team keeps playing; the score reads 0 from that instant and then moves normally; nothing else changes. Reset and Disqualify at the same instant: whichever takes the team lock first, and Disqualify wins in the end (it freezes the team and its override beats any baseline) |
+| Admin presses Reset while the team is mid-answer | Team keeps playing; the score reads 0 from that instant and then moves normally; nothing else changes. Reset and Disqualify at the same instant: whichever takes the team lock first, and Disqualify wins in the end (it freezes the team and its override beats any baseline) **[B16: Reset no longer exists; a penalised team is frozen. See SCORING_AND_LEADERBOARD.md.]** |
 | Member buys Tier 2 while Tier 1 is not owned | `HINT_TIER1_REQUIRED`, no charge |
 | Two members buy the same hint | Second returns `already_owned`, no charge |
 | Two members click *Buy time* at once | Second gets `STALE_PURCHASE_COUNT`; client refreshes and may buy again deliberately |
