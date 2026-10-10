@@ -12,6 +12,7 @@ import {
   signInMember,
 } from "./support/game";
 import type { E2ETeam } from "./support/identities";
+import { hintFirstLine, officialHint } from "./support/official";
 
 /**
  * Patch B15: real hint purchases and real Buy Time, through the real routes with real cookies, against the in-memory
@@ -44,7 +45,8 @@ test.describe("hints", () => {
       { tier: 1, cost: 20, owned: false, purchasable: true },
       { tier: 2, cost: 40, owned: false, purchasable: false },
     ]);
-    expect(JSON.stringify(before)).not.toContain("Hint 1 for A1");
+    expect(JSON.stringify(before)).not.toContain(hintFirstLine("A.1", 1));
+    expect(JSON.stringify(before)).not.toContain(hintFirstLine("A.1", 2));
 
     const key = randomUUID();
     const bought = await a.hint(Q1, 1, key);
@@ -52,7 +54,7 @@ test.describe("hints", () => {
     expect(bought.body.data).toMatchObject({
       already_owned: false,
       tier: 1,
-      hint: { tier: 1, body_md: "Hint 1 for A1: look again." },
+      hint: { tier: 1, body_md: officialHint("A.1", 1) },
     });
     expect(bought.body.data.state.team.coins).toBe(380);
 
@@ -63,7 +65,7 @@ test.describe("hints", () => {
 
     // a teammate sees it as owned, with the text, and buying it again is free
     const seen = (await b.question(Q1)).body.data.question.hints[0];
-    expect(seen).toMatchObject({ tier: 1, owned: true, body_md: "Hint 1 for A1: look again." });
+    expect(seen).toMatchObject({ tier: 1, owned: true, body_md: officialHint("A.1", 1) });
     const free = await b.hint(Q1, 1);
     expect(free.body.data.already_owned).toBe(true);
     const t = await inspect(team);
@@ -284,7 +286,7 @@ test.describe("hints and Buy Time in the browser", () => {
     await page.getByRole("dialog", { name: "Hint 1" }).getByRole("button", { name: "Yes" }).click();
     // the purchase opens the text straight away
     const text = page.getByRole("dialog", { name: "Hint 1" });
-    await expect(text).toContainText("Hint 1 for A1: look again.");
+    await expect(text).toContainText(hintFirstLine("A.1", 1));
     await text.getByRole("button", { name: "Close" }).click();
     await expect(text).toBeHidden();
     await expect(page.getByRole("group", { name: "Coins left" })).toContainText("380");
@@ -293,7 +295,7 @@ test.describe("hints and Buy Time in the browser", () => {
     // reading it again is free: no question, no charge
     await page.getByRole("button", { name: /^Hint 1/ }).click();
     const view = page.getByRole("dialog", { name: "Hint 1" });
-    await expect(view).toContainText("Hint 1 for A1: look again.");
+    await expect(view).toContainText(hintFirstLine("A.1", 1));
     await expect(view.getByRole("button", { name: "Yes" })).toHaveCount(0);
     await view.getByRole("button", { name: "Close" }).click();
     expect((await inspect(team)).coins).toBe(380);

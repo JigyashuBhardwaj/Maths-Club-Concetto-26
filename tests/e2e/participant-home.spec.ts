@@ -4,15 +4,17 @@ import type { Page } from "@playwright/test";
 
 import { beginTheme, createPlayerTeam, inspect, signInMember } from "./support/game";
 import { signInSharedParticipant, teamFor } from "./support/session";
+import { officialRules, officialTheme } from "./support/official";
 
 /** The ring is always drifting, so open a ticket the way a keyboard user would: focus it, press Enter. */
 async function openTicket(page: Page, name: string) {
-  const ticket = page.getByRole("button", { name });
+  const ticket = page.getByRole("button", { name, exact: true });
   await ticket.focus();
   await page.keyboard.press("Enter");
 }
 
-const ticketNames = [..."ABCDEFGHIJ"].map((c) => `THEME ${c}`);
+const ticketNames = [..."ABCDEFGHIJ"].map((c) => officialTheme(c).name);
+const nameOf = (c: string) => officialTheme(c).name;
 
 test.describe("participant home", () => {
   // /participant is a protected route (B11): every test here starts from a real signed-in participant session.
@@ -44,15 +46,18 @@ test.describe("participant home", () => {
     expect(score).toBeLessThanOrEqual(500);
     expect(score).toBeGreaterThan(400);
     for (const name of [...ticketNames, "FINAL SUBMIT"]) {
-      await expect(page.getByRole("button", { name })).toBeAttached();
+      await expect(page.getByRole("button", { name, exact: true })).toBeAttached();
     }
     await expect(page.locator("tbody tr")).toHaveCount(100);
     // exactly 10 themes + Final Submit = 11 tickets; Final Submit is last; K and L do not exist
     await expect(page.locator(".ticket")).toHaveCount(11);
     await expect(page.locator(".ticket").last()).toHaveText(/FINAL SUBMIT/);
-    await expect(page.locator(".ticket", { hasText: /^\s*[A-Z]?\s*THEME/ })).toHaveCount(10);
-    await expect(page.getByRole("button", { name: "THEME K" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "THEME L" })).toHaveCount(0);
+    // B17: the tickets carry the official theme names, in theme order A-J, and no placeholder label is left
+    await expect(page.locator(".ticket:not(.ticket-final) .ticket-label")).toHaveText(ticketNames);
+    await expect(page.locator(".ticket", { hasText: /THEME [A-L]\b/ })).toHaveCount(0);
+    await expect(page.locator(".ticket:not(.ticket-final) .ticket-stub")).toHaveText([
+      ..."ABCDEFGHIJ",
+    ]);
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
@@ -121,7 +126,11 @@ test.describe("participant home", () => {
     const front = page.locator('.ticket[data-index="0"]');
     const r = (await front.boundingBox())!;
     await page.mouse.click(r.x + r.width * 0.6, r.y + r.height / 2);
-    await expect(page.getByRole("dialog", { name: /THEME/ })).toBeVisible();
+    // the dialog is named by the opened theme's official name (whichever ticket the slowing ring put under the pointer)
+    const anyTheme = new RegExp(
+      `^(${ticketNames.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`,
+    );
+    await expect(page.getByRole("dialog", { name: anyTheme })).toBeVisible();
   });
 
   test("rules dialog opens, Close closes it, Escape closes it", async ({ page }) => {
@@ -130,7 +139,13 @@ test.describe("participant home", () => {
     await opener.click();
     const dialog = page.getByRole("dialog", { name: "Rules and Regulations" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(/Lorem ipsum/).first()).toBeVisible();
+    // B17: all eight official rules, in order, as a numbered list, and no placeholder text
+    const items = dialog.getByRole("listitem");
+    await expect(items).toHaveCount(8);
+    for (const [i, rule] of officialRules.entries()) {
+      await expect(items.nth(i)).toHaveText(rule);
+    }
+    await expect(dialog.getByText(/Lorem ipsum/)).toHaveCount(0);
     await dialog.getByRole("button", { name: "Close" }).click();
     await expect(dialog).toBeHidden();
     await expect(opener).toBeFocused();
@@ -149,11 +164,13 @@ test.describe("participant home", () => {
     // beginTheme already unlocked theme A for the team; theme F is still locked
     await page.goto("/participant");
     await expect(page.locator(".home-stats .stat-value").nth(1)).toHaveText("400");
-    await openTicket(page, "THEME F");
-    const dialog = page.getByRole("dialog", { name: "THEME F" });
+    await openTicket(page, nameOf("F"));
+    const dialog = page.getByRole("dialog", { name: nameOf("F") });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("E2E Theme F", { exact: true })).toBeVisible();
-    await expect(dialog.getByText("Description of E2E theme F.")).toBeVisible();
+    // B17: the heading is the official name and the body is exactly the official description of THIS theme
+    await expect(dialog.getByRole("heading", { name: nameOf("F"), exact: true })).toBeVisible();
+    await expect(dialog.getByText(officialTheme("F").description, { exact: true })).toBeVisible();
+    await expect(dialog).not.toContainText(officialTheme("E").description);
     await dialog.getByRole("button", { name: "Unlock with 100 coins" }).click();
     await expect(dialog.getByRole("link", { name: "Let's solve" })).toBeVisible();
     await expect(page.locator(".home-stats .stat-value").nth(1)).toHaveText("300");
@@ -188,7 +205,7 @@ test.describe("participant home", () => {
     await page.waitForTimeout(2500);
     const b = await rot();
     expect(b).toBeGreaterThan(a + 0.3);
-    await openTicket(page, "THEME A");
+    await openTicket(page, nameOf("A"));
     await expect(page.getByRole("dialog")).toBeVisible();
     // The pause is eased and frame-driven: the ring first glides to the opened ticket, then its drift fades to 0.
     // How long that takes depends on how far the ring had drifted and on the frame rate, so a fixed sleep is not a
@@ -228,13 +245,13 @@ test.describe("participant home", () => {
     test.skip(info.project.name === "mobile", "keyboard check once");
     await page.goto("/participant");
     await page.keyboard.press("Tab");
-    await page.getByRole("button", { name: "THEME A" }).focus();
+    await page.getByRole("button", { name: nameOf("A"), exact: true }).focus();
     await page.keyboard.press("ArrowRight");
-    await expect(page.getByRole("button", { name: "THEME B" })).toBeFocused();
+    await expect(page.getByRole("button", { name: nameOf("B"), exact: true })).toBeFocused();
     await page.keyboard.press("End");
     await expect(page.getByRole("button", { name: "FINAL SUBMIT" })).toBeFocused();
     await page.keyboard.press("Home");
-    await expect(page.getByRole("button", { name: "THEME A" })).toBeFocused();
+    await expect(page.getByRole("button", { name: nameOf("A"), exact: true })).toBeFocused();
   });
 
   test("dragging rotates the ring without opening a ticket", async ({ page }, info) => {

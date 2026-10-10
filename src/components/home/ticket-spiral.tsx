@@ -53,6 +53,7 @@ export function TicketSpiral() {
               )}
               style={{ "--i": i, "--a": i * STEP_DEG } as CSSProperties}
               data-index={i}
+              title={ticket.kind === "theme" ? ticket.label : undefined}
               aria-haspopup="dialog"
               onClick={() => choose(ticket)}
             >
@@ -80,7 +81,7 @@ export function TicketSpiral() {
               <span className="ticket-stub" aria-hidden="true">
                 {ticket.kind === "final" ? "★" : ticket.id}
               </span>
-              <span className="ticket-label">
+              <span className="ticket-label" data-long={ticket.label.length > 24 ? "" : undefined}>
                 {ticket.kind === "final" && submitted ? "SUBMITTED" : ticket.label}
               </span>
             </button>

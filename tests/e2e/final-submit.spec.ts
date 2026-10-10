@@ -12,6 +12,7 @@ import {
   signInMember,
 } from "./support/game";
 import type { E2ETeam } from "./support/identities";
+import { rewardOf } from "./support/official";
 
 /**
  * Patch B15: Final Submit. It is the team's own irreversible end, with the same terminal freeze as the timer reaching
@@ -112,14 +113,14 @@ test.describe("Final Submit (API)", () => {
       const id = (await inspect(team)).submissions[0]!.id;
       const approved = await review.approve(id);
       expect(approved.status).toBe(200);
-      expect(approved.body.data.reward_awarded).toBe(50);
+      expect(approved.body.data.reward_awarded).toBe(rewardOf("A.1"));
       expect(approved.body.data.next_question_activated).toBe(false);
       expect((await review.approve(id)).status).toBe(409);
     } finally {
       await api.dispose();
     }
     const t = await inspect(team);
-    expect(t.coins).toBe(450);
+    expect(t.coins).toBe(400 + rewardOf("A.1"));
     expect(t.questions["2"]!.state).toBe("LOCKED");
   });
 });

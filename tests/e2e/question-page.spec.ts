@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { signInSharedParticipant } from "./support/session";
 import { adminReviewer, beginTheme, createPlayerTeam, inspect, signInMember } from "./support/game";
 import type { E2ETeam } from "./support/identities";
+import { firstLine, officialTheme, rewardOf } from "./support/official";
 
 /**
  * A team of its own, signed in as member 1 in this page, that has entered the competition, unlocked theme A and
@@ -17,7 +18,7 @@ async function startTheme(page: Page): Promise<E2ETeam> {
   await signInMember(page.context(), team, 1);
   await page.goto("/participant/theme/A/1");
   await expect(page.getByText("Q1.")).toBeVisible({ timeout: 60_000 }); // inside the 90 s test budget below
-  await expect(page.locator(".q-text")).toContainText("Body of question A1");
+  await expect(page.locator(".q-text")).toContainText(firstLine("A.1"));
   return team;
 }
 
@@ -32,13 +33,17 @@ test.describe("question page", () => {
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
     page.on("pageerror", (e) => errors.push(String(e)));
     await startTheme(page);
-    await expect(page.getByRole("heading", { level: 1, name: "THEME A" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: officialTheme("A").name }),
+    ).toBeVisible();
     await expect(page.getByRole("group", { name: "Team timer" })).toBeVisible();
     await expect(page.getByRole("group", { name: "Question timer" })).toBeVisible();
     await expect(page.getByRole("button", { name: "buy time" })).toBeEnabled();
     // 500 starting coins less the 100 the team paid for the theme, both from the server
     await expect(page.getByRole("group", { name: "Coins left" })).toContainText("400");
-    await expect(page.getByRole("group", { name: /Reward/ })).toContainText("50 coins++");
+    await expect(page.getByRole("group", { name: /Reward/ })).toContainText(
+      `${rewardOf("A.1")} coins++`,
+    );
     // B15: Hint 1 can be bought on an active question; Hint 2 only after Hint 1
     await expect(page.getByRole("button", { name: /^Hint 1/ })).toBeEnabled();
     await expect(page.getByRole("button", { name: /^Hint 2/ })).toBeDisabled();
@@ -132,18 +137,20 @@ test.describe("question page", () => {
       const submission = (await inspect(team)).submissions[0]!;
       const approved = await admin.review.approve(submission.id);
       expect(approved.body.data).toMatchObject({
-        reward_awarded: 50,
+        reward_awarded: rewardOf("A.1"),
         next_question_activated: true,
       });
     } finally {
       await admin.api.dispose();
     }
     await expect(page.getByRole("button", { name: "Approved" })).toBeDisabled({ timeout: 20_000 });
-    await expect(page.getByRole("group", { name: "Coins left" })).toContainText("450");
+    await expect(page.getByRole("group", { name: "Coins left" })).toContainText(
+      String(400 + rewardOf("A.1")),
+    );
     await page.getByRole("link", { name: "Next question" }).click();
     await page.waitForURL("**/theme/A/2");
     await expect(page.getByText("Q2.")).toBeVisible();
-    await expect(page.locator(".q-text")).toContainText("Body of question A2");
+    await expect(page.locator(".q-text")).toContainText(firstLine("A.2"));
     await expect(page.getByRole("textbox")).toHaveValue("");
     await page.getByRole("link", { name: "Previous question" }).click();
     await page.waitForURL("**/theme/A/1");
@@ -196,7 +203,7 @@ test.describe("question page", () => {
     await page.goto("/participant/theme/A/2");
     await expect(page.getByText(/locked until the previous one is approved/i)).toBeVisible();
     // the locked page carries no question body
-    await expect(page.getByText("Body of question A2")).toHaveCount(0);
+    await expect(page.getByText(firstLine("A.2"))).toHaveCount(0);
   });
 
   test("unknown theme or question number is a 404", async ({ page }, info) => {

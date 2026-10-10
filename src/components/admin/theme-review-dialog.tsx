@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
+import { ContentText } from "@/components/ui/content-text";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import type { TeamThemeResult, ThemeQuestion } from "@/lib/contracts/matrix";
 import { gameErrorText } from "@/lib/gameplay/messages";
@@ -226,7 +227,7 @@ export function ThemeReviewDialog({
               </p>
               <div>
                 <p className="text-[11px] tracking-[0.2em] text-ink-dim uppercase">Question</p>
-                <p className="text-sm whitespace-pre-wrap text-ink">{submission.body_md}</p>
+                <ContentText className="text-sm text-ink" text={submission.body_md} />
               </div>
               <div>
                 <p className="text-[11px] tracking-[0.2em] text-ink-dim uppercase">

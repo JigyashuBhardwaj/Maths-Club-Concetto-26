@@ -2,6 +2,7 @@
 
 import { useId } from "react";
 
+import { ContentText } from "@/components/ui/content-text";
 import { ModalDialog } from "@/components/ui/modal-dialog";
 import type { Hint } from "@/lib/contracts/gameplay";
 
@@ -88,7 +89,7 @@ export function HintDialogs({
               <h2 id={viewId} className="dialog-title" tabIndex={-1} data-autofocus>
                 Hint {tier}
               </h2>
-              <p className="dialog-text q-hint-body">{hint?.body_md ?? ""}</p>
+              <ContentText className="dialog-text q-hint-body" text={hint?.body_md ?? ""} />
             </div>
             <div className="dialog-actions">
               <button type="button" className="btn btn-primary" onClick={() => onClose("view")}>

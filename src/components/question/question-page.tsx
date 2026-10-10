@@ -11,6 +11,7 @@ import {
   WalletIcon,
 } from "@/components/home/icons";
 import { HomeStage } from "@/components/home/home-stage";
+import { ContentText } from "@/components/ui/content-text";
 import { useGame, useServerNow } from "@/components/game/game-provider";
 import { QUESTIONS_PER_THEME } from "@/lib/contracts/competition";
 import type { BuyTimeOption } from "@/lib/contracts/gameplay";
@@ -29,7 +30,7 @@ import {
 } from "@/lib/gameplay/derive";
 import { gameErrorText, isRetryable } from "@/lib/gameplay/messages";
 import { formatDuration, formatMinSec } from "@/lib/home/format";
-import type { ThemeId } from "@/lib/home/themes";
+import { themeName, type ThemeId } from "@/lib/home/themes";
 import { newIdempotencyKey } from "@/lib/provisioning/client";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +66,7 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
   const { state, loadFailed, refresh, apply } = useGame();
   const now = useServerNow();
   const answerId = useId();
-  const titleLabel = `THEME ${theme}`;
+  const titleLabel = themeName(theme);
 
   const themeView = state ? findTheme(state, theme) : undefined;
   const summary = themeView?.questions[n - 1];
@@ -349,9 +350,10 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
           <div className="q-top">
             <div className="q-question" role="region" aria-label="Question" tabIndex={0}>
               <p className="q-number">Q{n}.</p>
-              <p className="q-text">
-                {q?.body_md ?? (detail.error ? "" : "Loading the question…")}
-              </p>
+              <ContentText
+                className="q-text"
+                text={q?.body_md ?? (detail.error ? "" : "Loading the question…")}
+              />
             </div>
             <div className="q-hints" role="group" aria-label="Hints">
               {hintButtons.map((h) => (

@@ -53,7 +53,11 @@ try {
   const target = urlFor(dbName);
   const sqlFiles = (dir) =>
     readdirSync(join(root, dir))
-      .filter((f) => (dir.endsWith("tests") ? f.endsWith(".test.sql") : f.endsWith(".sql")))
+      .filter((f) =>
+        dir.endsWith("tests") || dir.endsWith("fresh")
+          ? f.endsWith(".test.sql")
+          : f.endsWith(".sql"),
+      )
       .sort();
   for (const f of sqlFiles("supabase/migrations")) {
     ok = psql(target, ["-f", join(root, "supabase/migrations", f)], `migration ${f}`) && ok;
@@ -62,6 +66,20 @@ try {
   if (ok) ok = psql(target, ["-f", join(root, "supabase/seed.sql")], "seed (first run)");
   if (ok)
     ok = psql(target, ["-f", join(root, "supabase/seed.sql")], "seed (second run, idempotent)");
+  // B17: a freshly built database (migrations, THEN seed - the order `supabase db reset` uses) holds the OFFICIAL content. The "fresh"
+  // tests run against exactly that state. The ordinary tests were written against the placeholder seed, so once the fresh tests
+  // are done the placeholder state is rebuilt by the real seed (supabase/tests/include/placeholder_content.sql).
+  if (ok) {
+    for (const f of sqlFiles("supabase/tests/fresh")) {
+      ok = psql(target, ["-f", join(root, "supabase/tests/fresh", f)], `fresh test ${f}`) && ok;
+    }
+    if (ok)
+      ok = psql(
+        target,
+        ["-f", join(root, "supabase/tests/include/placeholder_content.sql")],
+        "placeholder content for the pre-B17 test suite (delete + seed.sql)",
+      );
+  }
   if (ok) {
     for (const f of sqlFiles("supabase/tests")) {
       ok = psql(target, ["-f", join(root, "supabase/tests", f)], `test ${f}`) && ok;

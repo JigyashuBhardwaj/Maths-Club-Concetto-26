@@ -3,11 +3,11 @@
 import { useId, useState } from "react";
 
 import { ModalDialog } from "@/components/ui/modal-dialog";
-import { LOREM_IPSUM } from "@/lib/home/themes";
+import { OFFICIAL_RULES } from "@/lib/content/official-public";
 
 import { InfoIcon } from "./icons";
 
-/** "Rules and regulations" stat + its dialog. The rules text is placeholder lorem ipsum for now. */
+/** "Rules and regulations" stat + its dialog: the eight official rules, in order, word for word. */
 export function RulesButton() {
   const [open, setOpen] = useState(false);
   const titleId = useId();
@@ -39,11 +39,13 @@ export function RulesButton() {
             Rules and Regulations
           </h2>
           <div className="dialog-scroll">
-            {[0, 1, 2, 3, 4].map((n) => (
-              <p key={n} className="dialog-text">
-                {LOREM_IPSUM}
-              </p>
-            ))}
+            <ol className="rules-list">
+              {OFFICIAL_RULES.map((rule) => (
+                <li key={rule} className="rules-item">
+                  {rule}
+                </li>
+              ))}
+            </ol>
           </div>
         </div>
         <div className="dialog-actions">

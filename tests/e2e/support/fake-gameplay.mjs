@@ -16,6 +16,8 @@
 // participant: no function here ever returns it.
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const DURATION_S = 14_400; // what a team starting now is given (competition.ultimate_seconds)
 // B15 fixtures: invented prices and packs. The application reads every one of them from the server; a spec that
@@ -41,14 +43,23 @@ const DIFFICULTY = [
 ];
 const UNLOCK_COST = 100;
 const TIME_LIMIT_S = 240;
-const REWARD = 50;
 export const SECRET_PREFIX = "E2E-SECRET-ANSWER";
+
+// The fake serves the OFFICIAL competition content (names, descriptions, questions, hints and per-question rewards) from
+// the one source of truth, so the browser tests exercise exactly what a team will read. Mechanics (prices, timers) stay
+// the fake's own.
+const OFFICIAL = JSON.parse(
+  readFileSync(join(process.cwd(), "content/concetto26/official-content.json"), "utf8"),
+);
+const officialTheme = (code) => OFFICIAL.themes.find((t) => t.id === code);
+const officialQuestion = (code, ordinal) =>
+  OFFICIAL.questions.find((q) => q.id === `${code}.${ordinal}`);
 
 export const THEMES = [...THEME_CODES].map((code, i) => ({
   id: i + 1,
   code,
-  name: `E2E Theme ${code}`,
-  description: `Description of E2E theme ${code}.`,
+  name: officialTheme(code).name,
+  description: officialTheme(code).description,
   topics: ["algebra", "geometry"],
   difficulty: DIFFICULTY[i],
   unlock_cost: UNLOCK_COST,
@@ -58,8 +69,9 @@ export const QUESTIONS = THEMES.flatMap((t) =>
     id: (t.id - 1) * 5 + ordinal,
     themeId: t.id,
     ordinal,
-    body: `Body of question ${t.code}${ordinal}: find the value.`,
-    reward: REWARD,
+    body: officialQuestion(t.code, ordinal).question,
+    hints: [officialQuestion(t.code, ordinal).hint1, officialQuestion(t.code, ordinal).hint2],
+    reward: officialQuestion(t.code, ordinal).reward,
     timeLimit: TIME_LIMIT_S,
     referenceAnswer: `${SECRET_PREFIX}-${t.code}${ordinal}`,
   })),
@@ -227,8 +239,7 @@ export function createGameplay({
     };
   }
 
-  const hintBody = (qq, tier) =>
-    `Hint ${tier} for ${THEMES[qq.themeId - 1].code}${qq.ordinal}: look again.`;
+  const hintBody = (qq, tier) => qq.hints[tier - 1];
   const optionId = (qid, n) => (qid - 1) * 3 + n;
 
   const slotOf = (t, memberId) => t.members.find((x) => x.id === memberId)?.slot ?? null;

@@ -14,6 +14,7 @@ import {
 } from "./support/game";
 import type { E2ETeam } from "./support/identities";
 import { control, loginForCookies, signInStaff, staffCredentials } from "./support/session";
+import { rewardOf } from "./support/official";
 
 /**
  * B14: the Admin "My Teams" live control matrix, in real browsers against the real routes. Everything the Admin does
@@ -120,14 +121,16 @@ test.describe("My Teams: the live matrix", () => {
     // no reference answer or key anywhere on the page
     await expect(dialog).not.toContainText("E2E-SECRET-ANSWER");
 
-    // 12-13. Approve: A.1 green, +50, A.2 opens
+    // 12-13. Approve: A.1 green, + its official reward, A.2 opens
     const before = await inspect(team);
     await dialog.getByRole("button", { name: "Approve", exact: true }).click();
-    await expect(dialog.getByRole("status")).toContainText("A.1 approved: +50 coins");
+    await expect(dialog.getByRole("status")).toContainText(
+      `A.1 approved: +${rewardOf("A.1")} coins`,
+    );
     await expect(dialog.getByTestId("question-A.1")).toHaveAttribute("data-color", "GREEN", LIVE);
     await expect(dialog.getByTestId("question-A.2")).toContainText("In progress", LIVE);
     const after = await inspect(team);
-    expect(after.coins).toBe(before.coins + 50); // 14
+    expect(after.coins).toBe(before.coins + rewardOf("A.1")); // 14
     expect(after.questions["1"]!.state).toBe("APPROVED");
     expect(after.questions["2"]!.state).toBe("ACTIVE"); // 15
     expect(after.audit.filter((e) => e === "SUBMISSION_APPROVED")).toHaveLength(1);
@@ -137,9 +140,9 @@ test.describe("My Teams: the live matrix", () => {
     await expect(cellOf(page, team, "A")).toHaveAttribute("data-state", "NORMAL", LIVE);
     await expect(cellOf(page, team, "A")).toHaveText("1/5");
     // 16. and the participant sees the coins and the next question without any action of their own
-    await expect(coinsOf(p1)).toHaveText("450", LIVE);
+    await expect(coinsOf(p1)).toHaveText(String(400 + rewardOf("A.1")), LIVE);
     const state = await player(m1).state();
-    expect(state.body.data.team.coins).toBe(450);
+    expect(state.body.data.team.coins).toBe(400 + rewardOf("A.1"));
     await ctx1.close();
     await ctx2.close();
   });
@@ -213,7 +216,7 @@ test.describe("My Teams: the live matrix", () => {
     await dialog.getByRole("button", { name: "Approve", exact: true }).dblclick();
     await expect(dialog.getByTestId("question-A.1")).toHaveAttribute("data-color", "GREEN", LIVE);
     const once = await inspect(team);
-    expect(once.coins).toBe(450);
+    expect(once.coins).toBe(400 + rewardOf("A.1"));
     expect(once.audit.filter((e) => e === "SUBMISSION_APPROVED")).toHaveLength(1);
 
     // the same request replayed with its own key, and five concurrent attempts with fresh keys
@@ -230,7 +233,7 @@ test.describe("My Teams: the live matrix", () => {
       await reviewer.api.dispose();
     }
     const end = await inspect(team);
-    expect(end.coins).toBe(450);
+    expect(end.coins).toBe(400 + rewardOf("A.1"));
     expect(end.audit.filter((e) => e === "SUBMISSION_APPROVED")).toHaveLength(1);
   });
 
@@ -249,7 +252,7 @@ test.describe("My Teams: the live matrix", () => {
       await reviewer.api.dispose();
     }
     const end = await inspect(team);
-    expect(end.coins).toBe(450);
+    expect(end.coins).toBe(400 + rewardOf("A.1"));
     expect(end.questions["2"]!.state).toBe("ACTIVE");
     expect(end.audit.filter((e) => e === "SUBMISSION_APPROVED")).toHaveLength(1);
   });

@@ -9,6 +9,12 @@ import { RulesButton } from "@/components/home/rules-dialog";
 import { TicketSpiral } from "@/components/home/ticket-spiral";
 
 import { Game, makeClient, makeEconomy, NOW, snapshot } from "./support/game";
+import content from "../../content/concetto26/official-content.json";
+
+const officialTheme = Object.fromEntries(content.themes.map((t) => [t.id, t.name])) as Record<
+  string,
+  string
+>;
 
 const client = vi.hoisted(() => ({}) as Record<string, ReturnType<typeof vi.fn>>);
 vi.mock("@/lib/gameplay/client", () => client);
@@ -162,6 +168,21 @@ describe("Rules dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(dialog).not.toHaveAttribute("open"));
   });
+
+  it("shows all eight official rules, in order and word for word, as a numbered list", () => {
+    render(<RulesButton />);
+    fireEvent.click(screen.getByRole("button", { name: /rules and regulations/i }));
+    const list = screen.getByRole("list");
+    expect(list.tagName).toBe("OL");
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(8);
+    content.rules.forEach((rule, i) => {
+      expect(items[i]!.textContent).toBe(rule.text);
+    });
+    expect(screen.queryByText(/lorem ipsum/i)).toBeNull();
+    // approved correction of the document's typo: the question timer is four minutes
+    expect(items[1]!.textContent).toContain("base time limit of 4 minutes");
+  });
 });
 
 describe("Leaderboard own line without a participant snapshot", () => {
@@ -275,15 +296,20 @@ describe("TicketSpiral", () => {
   it("renders exactly 10 themes (A-J) and the final ticket last; no K or L", () => {
     withGame(<TicketSpiral />);
     const labels = screen
-      .getAllByRole("button", { name: /^(THEME|FINAL)/ })
+      .getAllByRole("button", { name: /\S/ })
+      .filter((b) => b.classList.contains("ticket"))
       .map((b) => b.querySelector(".ticket-label")?.textContent);
     expect(labels).toHaveLength(11);
-    expect(labels.filter((l) => l?.startsWith("THEME"))).toHaveLength(10);
-    expect(labels).toEqual([..."ABCDEFGHIJ"].map((c) => `THEME ${c}`).concat("FINAL SUBMIT"));
+    // B17: the official names, in theme order, then the final ticket; no placeholder label remains
+    expect(labels).toEqual(content.themes.map((t) => t.name).concat("FINAL SUBMIT"));
     expect(labels.at(-1)).toBe("FINAL SUBMIT");
-    expect(screen.getByRole("button", { name: /THEME J/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /THEME K/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /THEME L/ })).toBeNull();
+    expect(labels.some((l) => /^THEME [A-Z]$/.test(l ?? ""))).toBe(false);
+    // the full name is also the tooltip, and the stub still shows the internal theme letter
+    for (const t of content.themes) {
+      const button = screen.getByRole("button", { name: t.name });
+      expect(button).toHaveAttribute("title", t.name);
+      expect(button.querySelector(".ticket-stub")).toHaveTextContent(t.id);
+    }
   });
 
   it("a ticket glows only for a theme the TEAM has unlocked, per the server snapshot", () => {
@@ -291,14 +317,14 @@ describe("TicketSpiral", () => {
       <TicketSpiral />,
       snapshot({ themes: { B: { q: ["AVAILABLE", "LOCKED", "LOCKED", "LOCKED", "LOCKED"] } } }),
     );
-    expect(screen.getByRole("button", { name: /THEME B/ })).toHaveClass("is-unlocked");
-    expect(screen.getByRole("button", { name: /THEME A/ })).not.toHaveClass("is-unlocked");
+    expect(screen.getByRole("button", { name: officialTheme.B })).toHaveClass("is-unlocked");
+    expect(screen.getByRole("button", { name: officialTheme.A })).not.toHaveClass("is-unlocked");
   });
 
   it("theme dialog shows the server's text and price; Unlock asks the server once and then offers Let's solve", async () => {
     withGame(<TicketSpiral />);
-    fireEvent.click(screen.getByRole("button", { name: /THEME C/ }));
-    const theme = screen.getByRole("dialog", { name: "THEME C" });
+    fireEvent.click(screen.getByRole("button", { name: officialTheme.C }));
+    const theme = screen.getByRole("dialog", { name: officialTheme.C });
     expect(theme).toHaveAttribute("open");
     expect(screen.getByText("Server description of theme C.")).toBeInTheDocument();
     const after = snapshot({
@@ -328,7 +354,7 @@ describe("TicketSpiral", () => {
         themes: { D: { q: ["APPROVED", "APPROVED", "ACTIVE", "LOCKED", "LOCKED"] } },
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: /THEME D/ }));
+    fireEvent.click(screen.getByRole("button", { name: officialTheme.D }));
     expect(screen.getByRole("link", { name: "Let's solve" })).toHaveAttribute(
       "href",
       "/participant/theme/D/3",
@@ -338,14 +364,14 @@ describe("TicketSpiral", () => {
 
   it("not enough coins: Unlock is disabled and says why; a server refusal shows fixed wording", async () => {
     withGame(<TicketSpiral />, snapshot({ team: { coins: 40 } }));
-    fireEvent.click(screen.getByRole("button", { name: /THEME E/ }));
+    fireEvent.click(screen.getByRole("button", { name: officialTheme.E }));
     expect(screen.getByRole("button", { name: "Unlock with 100 coins" })).toBeDisabled();
     expect(screen.getByText(/costs 100 coins and your team has 40/)).toBeInTheDocument();
   });
 
   it("INSUFFICIENT_COINS from the server (the balance moved) shows a message and no unlock", async () => {
     withGame(<TicketSpiral />);
-    fireEvent.click(screen.getByRole("button", { name: /THEME F/ }));
+    fireEvent.click(screen.getByRole("button", { name: officialTheme.F }));
     c.unlockThemeCall.mockResolvedValue(c.fail("INSUFFICIENT_COINS", 409, { have: 20, need: 100 }));
     fireEvent.click(screen.getByRole("button", { name: "Unlock with 100 coins" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("You don't have enough coins");

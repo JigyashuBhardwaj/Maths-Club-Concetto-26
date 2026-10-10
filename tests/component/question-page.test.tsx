@@ -7,6 +7,7 @@ import { QuestionPage } from "@/components/question/question-page";
 import { DRAFT_DEBOUNCE_MS } from "@/components/question/use-draft";
 
 import { Game, makeClient, NOW, question, snapshot, type QState } from "./support/game";
+import content from "../../content/concetto26/official-content.json";
 
 // The WebGL background is not what is under test (and jsdom has no WebGL).
 vi.mock("@/components/home/home-stage", () => ({
@@ -72,12 +73,27 @@ describe("opening a question", () => {
     expect(await screen.findByText("Find the value of x.")).toBeInTheDocument();
   });
 
+  it("B17: a multi-line official question keeps its line breaks, its math symbols and its aligned table", async () => {
+    const body = content.questions.find((x) => x.id === "E.3")!.question;
+    c.fetchQuestion.mockResolvedValue(c.ok(question({ body_md: body })));
+    mount(states("ACTIVE", "LOCKED", "LOCKED", "LOCKED", "LOCKED"));
+    const text = await screen.findByText(/Two poker players/);
+    const root = text.closest(".q-text")!;
+    expect(root.querySelector("pre.content-pre")!.textContent).toContain(
+      "Play Safe (S)   3          −2",
+    );
+    expect(root.textContent).toContain("−4");
+    expect(root.querySelector("script, img, a")).toBeNull();
+  });
+
   it("an ACTIVE question is read, not re-entered; the page shows the five stats from the server", async () => {
     c.fetchQuestion.mockResolvedValue(c.ok(question()));
     mount(states("ACTIVE", "LOCKED", "LOCKED", "LOCKED", "LOCKED"));
     expect(await screen.findByText("Find the value of x.")).toBeInTheDocument();
     expect(c.enterQuestionCall).not.toHaveBeenCalled();
-    expect(screen.getByRole("heading", { level: 1, name: "THEME A" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: content.themes[0]!.name }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Team timer" })).toHaveTextContent(
       /03:(58:5\d|59:\d\d)/,
     );

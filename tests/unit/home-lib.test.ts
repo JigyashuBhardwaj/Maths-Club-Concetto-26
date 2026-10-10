@@ -17,6 +17,7 @@ import {
   ticketAngle,
 } from "@/lib/home/spiral";
 import { FINAL_TICKET, THEMES, TICKETS } from "@/lib/home/themes";
+import content from "../../content/concetto26/official-content.json";
 
 describe("formatDuration", () => {
   it("formats HH:MM:SS", () => {
@@ -88,9 +89,11 @@ describe("spiral geometry", () => {
 describe("tickets", () => {
   it("has exactly 10 themes A-J plus the final ticket (11 tickets), and no K or L", () => {
     expect(THEMES).toHaveLength(10);
-    expect(THEMES.map((t) => t.label)).toEqual("ABCDEFGHIJ".split("").map((c) => `THEME ${c}`));
-    expect(THEMES.map((t) => t.label)).not.toContain("THEME K");
-    expect(THEMES.map((t) => t.label)).not.toContain("THEME L");
+    // B17: the ticket label is the official theme name; the theme id (A-J) stays the key
+    expect(THEMES.map((t) => t.id)).toEqual("ABCDEFGHIJ".split(""));
+    expect(THEMES.map((t) => t.label)).toEqual(content.themes.map((t) => t.name));
+    expect(THEMES.map((t) => t.description)).toEqual(content.themes.map((t) => t.description));
+    expect(THEMES.some((t) => /^THEME [A-Z]$/.test(t.label))).toBe(false);
     expect(TICKETS).toHaveLength(11);
     expect(TICKETS[10]).toBe(FINAL_TICKET);
     expect(TICKETS.filter((t) => t.kind === "final")).toHaveLength(1);

@@ -24,7 +24,7 @@ const STATUS_NOTE: Record<string, string> = {
 };
 
 /**
- * "THEME X" dialog. The theme's name, description, price and unlocked state all come from the team snapshot. Unlocking
+ * Theme dialog: the heading is the theme's official name; the description, price and unlocked state all come from the team snapshot. Unlocking
  * is TEAM-WIDE and charged once, on the server: this dialog only asks (`POST /api/p/themes/:id/unlock`) and then shows
  * whatever the server answers. If a teammate unlocked it first, the snapshot flips this dialog to "Let's solve" with
  * no charge. The Idempotency-Key of one click is kept until the server answers, so a lost response can be retried
@@ -75,9 +75,6 @@ export function ThemeDialog({ ticket, open, onClose }: ThemeDialogProps) {
         </h2>
         {theme ? (
           <>
-            <p className="dialog-text">
-              <strong>{theme.name}</strong>
-            </p>
             <p className="dialog-text">{theme.description}</p>
             {unlocked && STATUS_NOTE[theme.status] ? (
               <p className="ticket-note">{STATUS_NOTE[theme.status]}</p>

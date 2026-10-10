@@ -19,6 +19,7 @@ import {
 } from "./support/game";
 import type { E2ETeam } from "./support/identities";
 import { control } from "./support/session";
+import { firstLine, officialTheme, rewardOf } from "./support/official";
 
 /**
  * The B13 vertical slice, played by two members of ONE team in two separate browser contexts (two cookie jars, two
@@ -43,7 +44,6 @@ const B2 = 7;
 const C1 = 11;
 const D1 = 16;
 const UNLOCK_COST = 100;
-const REWARD = 50;
 /** A page load under software WebGL can take a while; this is a wait for the page, not for the engine. */
 const LOAD = { timeout: 45_000 };
 
@@ -139,19 +139,21 @@ test.describe("gameplay: two members of one team", () => {
 
   test("a theme unlocked by one member is unlocked for the whole team and charged once", async () => {
     await expect(coinsOf(one)).toHaveText("500");
-    await one.getByRole("button", { name: "THEME B" }).focus();
+    await one.getByRole("button", { name: officialTheme("B").name, exact: true }).focus();
     await one.keyboard.press("Enter");
-    const dialog = one.getByRole("dialog", { name: "THEME B" });
+    const dialog = one.getByRole("dialog", { name: officialTheme("B").name });
     await dialog.getByRole("button", { name: `Unlock with ${UNLOCK_COST} coins` }).click();
     await expect(dialog.getByRole("link", { name: "Let's solve" })).toBeVisible();
     await expect(coinsOf(one)).toHaveText("400");
 
     // member 2 did nothing: their next poll shows the theme as unlocked and the balance as 400, with no charge of their own
     await expect(coinsOf(two)).toHaveText("400", { timeout: 20_000 });
-    await two.getByRole("button", { name: "THEME B" }).focus();
+    await two.getByRole("button", { name: officialTheme("B").name, exact: true }).focus();
     await two.keyboard.press("Enter");
     await expect(
-      two.getByRole("dialog", { name: "THEME B" }).getByRole("link", { name: "Let's solve" }),
+      two
+        .getByRole("dialog", { name: officialTheme("B").name })
+        .getByRole("link", { name: "Let's solve" }),
     ).toBeVisible();
     await two.keyboard.press("Escape");
     await dialog.getByRole("button", { name: "Explore other themes" }).click();
@@ -183,7 +185,7 @@ test.describe("gameplay: two members of one team", () => {
       deadline: null,
     });
     await one.goto("/participant/theme/B/1");
-    await expect(one.locator(".q-text")).toContainText("Body of question B1", LOAD);
+    await expect(one.locator(".q-text")).toContainText(firstLine("B.1"), LOAD);
     await expect(one.getByRole("button", { name: /start/i })).toHaveCount(0);
     await expect(questionTimer(one)).toHaveText(/0[34]:\d\d/);
     const started = (await inspect(team)).questions[String(B1)]!;
@@ -192,7 +194,7 @@ test.describe("gameplay: two members of one team", () => {
 
     // the second member opens the same page later: same body, same deadline, no restart
     await two.goto("/participant/theme/B/1");
-    await expect(two.locator(".q-text")).toContainText("Body of question B1", LOAD);
+    await expect(two.locator(".q-text")).toContainText(firstLine("B.1"), LOAD);
     await expect(questionTimer(two)).toHaveText(/0[34]:\d\d/);
     // both pages count down to the SAME server deadline (the browser, the app server and the stand-in share one clock;
     // a page that is busy rendering lags by a few ticks, never by a different deadline)
@@ -279,7 +281,7 @@ test.describe("gameplay: two members of one team", () => {
       const key = randomUUID();
       const approved = await admin.review.approve(submission.id, key);
       expect(approved.body.data).toMatchObject({
-        reward_awarded: REWARD,
+        reward_awarded: rewardOf("B.1"),
         next_question_activated: true,
       });
       expect(approved.replayed).toBe(false);
@@ -292,13 +294,13 @@ test.describe("gameplay: two members of one team", () => {
       await admin.api.dispose();
     }
     const after = await inspect(team);
-    expect(after.coins).toBe(before.coins + REWARD);
+    expect(after.coins).toBe(before.coins + rewardOf("B.1"));
     expect(after.questions[String(B1)]!.state).toBe("APPROVED");
     expect(after.questions[String(B2)]!.state).toBe("ACTIVE");
     expect(after.questions[String(B2)]!.deadline).not.toBeNull();
     expect(after.submissions.find((s) => s.id === submission.id)).toMatchObject({
       status: "APPROVED",
-      reward: REWARD,
+      reward: rewardOf("B.1"),
     });
 
     // both members' pages show it after their next poll, and Q2 is playable
@@ -312,7 +314,7 @@ test.describe("gameplay: two members of one team", () => {
     }
     await one.getByRole("link", { name: "Next question" }).click();
     await one.waitForURL("**/theme/B/2");
-    await expect(one.locator(".q-text")).toContainText("Body of question B2", LOAD);
+    await expect(one.locator(".q-text")).toContainText(firstLine("B.2"), LOAD);
     await expect(questionTimer(one)).toHaveText(/0[34]:\d\d/);
     await expect(one.getByRole("textbox")).toBeEditable();
   });
@@ -335,7 +337,7 @@ test.describe("gameplay: two members of one team", () => {
     const locked = await player(api1).question(D1);
     expect(locked.status).toBe(409);
     expect(locked.body.error.code).toBe("THEME_LOCKED");
-    expect(JSON.stringify(locked.body)).not.toContain("Body of question");
+    expect(JSON.stringify(locked.body)).not.toContain(firstLine("D.1"));
 
     // browser storage is not an authority: doctored values change nothing on screen
     await one.goto("/participant");
@@ -386,7 +388,7 @@ test.describe("gameplay: two members of one team", () => {
     expect(t.audit.filter((e) => e === "ANSWER_SUBMITTED")).toHaveLength(2);
     expect(t.audit.filter((e) => e === "SUBMISSION_APPROVED")).toHaveLength(1);
     expect(t.themes).toHaveLength(2);
-    expect(t.coins).toBe(500 - 2 * UNLOCK_COST + REWARD);
+    expect(t.coins).toBe(500 - 2 * UNLOCK_COST + rewardOf("B.1"));
     await control("inspect", { loginId: team.loginId }); // the control stays read-only
   });
 });

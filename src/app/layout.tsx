@@ -14,6 +14,17 @@ const manrope = localFont({
   variable: "--font-manrope",
 });
 
+// Manrope is a Latin-only subset: Greek letters, sub/superscripts, ₹, arrows and the mathematical operators of the official
+// questions come from this small fallback (a DejaVu Sans subset, licence beside it), so they look the same on every device
+// instead of depending on whatever the visitor's system happens to have. It is only fetched when such a character is shown.
+const mathFallback = localFont({
+  src: "../assets/fonts/ConcettoMath-fallback.woff2",
+  weight: "400",
+  display: "swap",
+  preload: false,
+  variable: "--font-math",
+});
+
 export function generateMetadata(): Metadata {
   return {
     metadataBase: new URL(getServerEnv().APP_ORIGIN),
@@ -32,7 +43,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={manrope.variable}>
+    <html lang="en" className={`${manrope.variable} ${mathFallback.variable}`}>
       <body>{children}</body>
     </html>
   );

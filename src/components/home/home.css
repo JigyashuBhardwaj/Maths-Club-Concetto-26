@@ -437,6 +437,20 @@
   letter-spacing: 0.14em;
   white-space: nowrap;
 }
+/* Official theme names are up to 47 characters: they wrap (balanced, at most 3 lines) instead of overflowing the ticket;
+   the full name is also the button's title and the dialog heading. The final ticket keeps its single line. */
+.ticket:not(.ticket-final) .ticket-label {
+  white-space: normal;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  font-size: calc(var(--tw) * 0.07);
+}
+.ticket:not(.ticket-final) .ticket-label[data-long] {
+  letter-spacing: 0.03em;
+  font-size: calc(var(--tw) * 0.056);
+}
 .ticket-final .ticket-body {
   fill: rgba(70, 28, 8, 0.94);
   stroke: rgba(255, 170, 100, 0.95);
@@ -695,4 +709,26 @@
   margin: 0 0 12px;
   color: #ffb3a1;
   font-size: 13px;
+}
+
+/* ---------- rules and regulations (official text, numbered) ---------- */
+.rules-list {
+  margin: 0;
+  padding: 0 0 0 1.6em;
+  list-style: decimal outside; /* the global reset removes list markers; the rules are a numbered list */
+  display: grid;
+  gap: 12px;
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.rules-item {
+  display: list-item;
+  list-style: inherit;
+  padding-left: 0.3em;
+  overflow-wrap: anywhere;
+}
+.rules-item::marker {
+  color: var(--orange);
+  font-weight: 700;
 }

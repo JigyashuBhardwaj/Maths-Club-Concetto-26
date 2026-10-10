@@ -15,6 +15,7 @@ import {
 } from "./support/game";
 import type { E2ETeam } from "./support/identities";
 import { loginForCookies, signInStaff, staffCredentials } from "./support/session";
+import { rewardOf, themeRewards } from "./support/official";
 
 /**
  * Patch B16: the score, the live leaderboard and the UFM penalty, in real browsers against the real routes. The
@@ -22,7 +23,7 @@ import { loginForCookies, signInStaff, staffCredentials } from "./support/sessio
  * the freeze and the concurrency are proven against real PostgreSQL in supabase/tests/150-170 and the concurrency script.
  *
  * score = completed themes x 500 + solved questions x 100 + remaining coins - minutes taken x 5.
- * A team starts with 500 coins, unlocking a theme costs 100, a hint 20, an approval pays 50. Minutes are ELAPSED minutes
+ * A team starts with 500 coins, unlocking a theme costs 100, a hint 20, an approval pays the question's own reward from the official document (A.1 pays 100). Minutes are ELAPSED minutes
  * (allowance - remaining), rounded to the nearest minute, so `ageTeam(.., 405_000)` (6:45) plus a few seconds of test
  * run time is always exactly 7 minutes, with a 45 s margin either way.
  *
@@ -96,19 +97,20 @@ test.describe("score and leaderboard (API)", () => {
       expect((await a.hint(Q1, 1)).status).toBe(200);
       expect(await scoreOnBoard(admin, team)).toBe(345);
 
-      // an approved answer: +50 coins reward and +100 for a solved question
+      // an approved answer: the question's own reward in coins and +100 for a solved question
       const first = await submitAnswer(team, a, Q1);
       expect(await scoreOnBoard(admin, team)).toBe(345); // waiting for approval changes nothing
       expect((await review.approve(first)).status).toBe(200);
-      expect(await scoreOnBoard(admin, team)).toBe(495);
+      expect(await scoreOnBoard(admin, team)).toBe(345 + rewardOf("A.1") + 100);
 
-      // four more approvals complete the theme: +500 for it, +50 and +100 for each answer
+      // four more approvals complete the theme: +500 for it, and each answer's own reward and +100
       for (const qid of [2, 3, 4, 5]) {
         const id = await submitAnswer(team, a, qid);
         expect((await review.approve(id)).status).toBe(200);
       }
-      expect(await scoreOnBoard(admin, team)).toBe(1595);
-      expect((await inspect(team)).score).toBe(1595);
+      const finished = 345 + themeRewards("A") + 5 * 100 + 500;
+      expect(await scoreOnBoard(admin, team)).toBe(finished);
+      expect((await inspect(team)).score).toBe(finished);
     } finally {
       await reviewerApi.dispose();
       await admin.dispose();
@@ -137,9 +139,9 @@ test.describe("score and leaderboard (API)", () => {
       // the reviewer approves the waiting answer after the freeze: the reward is paid once, the score stays
       const approved = await review.approve(pending);
       expect(approved.status).toBe(200);
-      expect(approved.body.data.reward_awarded).toBe(50);
+      expect(approved.body.data.reward_awarded).toBe(rewardOf("A.1"));
       const after = await inspect(team);
-      expect(after.coins).toBe(frozen.coins + 50);
+      expect(after.coins).toBe(frozen.coins + rewardOf("A.1"));
       expect(after.final).toEqual(frozen.final);
       expect(await scoreOnBoard(admin, team)).toBe(365);
     } finally {
@@ -166,7 +168,7 @@ test.describe("score and leaderboard (API)", () => {
       expect((await inspect(team)).final).toMatchObject({ minutes: 240, score: -800 });
 
       expect((await review.approve(pending)).status).toBe(200); // pays the coins...
-      expect((await inspect(team)).coins).toBe(450);
+      expect((await inspect(team)).coins).toBe(400 + rewardOf("A.1"));
       expect(await scoreOnBoard(admin, team)).toBe(-800); // ...but the frozen score is final
     } finally {
       await reviewerApi.dispose();
@@ -318,7 +320,7 @@ test.describe("UFM penalty (Penalise this team)", () => {
       const id = await submitAnswer(team, a, Q1);
       expect((await review.approve(id)).status).toBe(200);
       const before = await inspect(team);
-      expect(await scoreOnBoard(admin, team)).toBe(495);
+      expect(await scoreOnBoard(admin, team)).toBe(345 + rewardOf("A.1") + 100);
 
       const dialog = await openPenalty(page, team);
       await dialog.getByRole("button", { name: "Yes" }).click();

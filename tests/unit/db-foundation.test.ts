@@ -38,20 +38,21 @@ function walk(dir: string, out: string[] = []): string[] {
 
 describe("migrations", () => {
   it("are ordered, uniquely numbered and complete", () => {
-    expect(migrationNames).toHaveLength(18);
+    expect(migrationNames).toHaveLength(19);
     for (const f of migrationNames) expect(f).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
     expect(new Set(migrationNames.map((f) => f.slice(0, 14))).size).toBe(migrationNames.length);
     expect(migrationNames[0]).toContain("extensions_enums_clock");
-    expect(migrationNames.at(-10)).toContain("security_rls");
-    expect(migrationNames.at(-9)).toContain("buy_time_options");
-    expect(migrationNames.at(-8)).toContain("auth_functions");
-    expect(migrationNames.at(-7)).toContain("runtime_engine");
-    expect(migrationNames.at(-6)).toContain("provisioning");
-    expect(migrationNames.at(-5)).toContain("gameplay_engine");
-    expect(migrationNames.at(-4)).toContain("admin_matrix");
-    expect(migrationNames.at(-3)).toContain("timer_14400_and_finalization");
-    expect(migrationNames.at(-2)).toContain("economy_and_final_submit");
-    expect(migrationNames.at(-1)).toContain("scoring_leaderboard_penalty");
+    expect(migrationNames.at(-11)).toContain("security_rls");
+    expect(migrationNames.at(-10)).toContain("buy_time_options");
+    expect(migrationNames.at(-9)).toContain("auth_functions");
+    expect(migrationNames.at(-8)).toContain("runtime_engine");
+    expect(migrationNames.at(-7)).toContain("provisioning");
+    expect(migrationNames.at(-6)).toContain("gameplay_engine");
+    expect(migrationNames.at(-5)).toContain("admin_matrix");
+    expect(migrationNames.at(-4)).toContain("timer_14400_and_finalization");
+    expect(migrationNames.at(-3)).toContain("economy_and_final_submit");
+    expect(migrationNames.at(-2)).toContain("scoring_leaderboard_penalty");
+    expect(migrationNames.at(-1)).toContain("official_content");
   });
 
   // B9 (auth_functions), B10 (runtime_engine), B12 (provisioning), B13 (gameplay_engine), B14 (admin_matrix) and B15
