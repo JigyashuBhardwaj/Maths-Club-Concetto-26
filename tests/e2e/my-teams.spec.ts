@@ -291,11 +291,18 @@ test.describe("My Teams: the live matrix", () => {
     const p4 = await ctx.newPage();
     await p4.goto("/participant");
     await expect(presenceOf(page, team, 4)).toHaveText("IN", LIVE);
+    // Network loss on a REAL page. Its API calls are blocked so that it gives no sign of life: otherwise its own 5 s state
+    // poll (any authenticated request counts as life) brings the member back IN within seconds of the silence, and the
+    // matrix's 3 s poll can miss that short OUT window altogether (this test failed about 1 run in 10 for that reason, on
+    // the B17 code as well). Blocking makes OUT deterministic; lifting the block lets the page recover with no help.
+    await p4.route("**/api/p/**", (route) => route.abort());
+    await p4.waitForTimeout(500); // a request already on the wire lands before the silence is applied
     await control("silence", {
       admissionNo: team.members.find((m) => m.slot === 4)!.admissionNo,
       seconds: 80,
     });
     await expect(presenceOf(page, team, 4)).toHaveText("OUT", LIVE);
+    await p4.unroute("**/api/p/**"); // the network is back: the page recovers on its own, with no action by anyone
     await expect(presenceOf(page, team, 4)).toHaveText("IN", { timeout: 40_000 });
     await ctx.close();
     await m1.dispose();

@@ -112,6 +112,15 @@ const count = async (sql) => Number(await must(sql));
 
 // ---- B: two admins, same team code, same instant -------------------------------------------------------------------
 {
+  // B18: teams (and their ledgers) can now be deleted, but a LOSING racer must still leave no trace at all. Count what
+  // exists before the race, then require that the winner added exactly one team's worth and the loser added nothing.
+  const footprint = () =>
+    must(`select concat_ws(',',
+      (select count(*) from teams), (select count(*) from team_members),
+      (select count(*) from coin_transactions), (select count(*) from audit_events where event_type = 'TEAM_CREATED'))`).then(
+      (r) => r.split(",").map(Number),
+    );
+  const before = await footprint();
   const rs = await Promise.all([
     team(ADMIN1, "PB1", "pb1_login_a", 211, "PBA"),
     team(ADMIN2, "PB1", "pb1_login_b", 212, "PBB"),
@@ -138,6 +147,13 @@ const count = async (sql) => Number(await must(sql));
       `select count(*) from coin_transactions c where not exists (select 1 from teams t where t.id = c.team_id)`,
     ),
     0,
+  );
+  // exactly one team's worth of rows appeared: teams +1, members +4, ONE INITIAL_GRANT, ONE TEAM_CREATED audit row
+  const after = await footprint();
+  assert.deepEqual(
+    after.map((n, i) => n - before[i]),
+    [1, 4, 1, 1],
+    "the winner added exactly one team; the loser added nothing (no team, member, ledger or audit row)",
   );
   console.log("ok    B. two admins racing for one team code: one wins, the loser rolls back whole");
 }

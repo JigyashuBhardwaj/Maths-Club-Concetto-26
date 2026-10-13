@@ -12,7 +12,11 @@ export const metadata: Metadata = {
 
 export default async function Layout({ children }: { children: ReactNode }) {
   const principal = await requireStaffArea("superadmin");
-  const nav = [{ label: "Create admin", node: <CreateAdminNav /> }];
+  const nav = [
+    { label: "Create admin", node: <CreateAdminNav /> },
+    { label: "Delete admins", href: "/superadmin/delete-admins" },
+    { label: "Delete teams", href: "/superadmin/delete-teams" },
+  ];
   return (
     <AppShell role="superadmin" nav={nav} userName={principal.staff.name}>
       {children}

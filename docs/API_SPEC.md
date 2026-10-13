@@ -37,6 +37,7 @@ Status: **proposal for review (Milestone 0).** Contract-first: the zod schemas i
 | TEAM_CODE_TAKEN | 409 | **B12.** A team with that Team ID already exists |
 | LOGIN_ID_TAKEN | 409 | **B12.** A team with that Login ID (case-insensitive) already exists |
 | ADMISSION_NO_TAKEN | 409 | **B12.** An admission number already belongs to a team; `details: {slot}` names the member (1–4) |
+| DELETE_BLOCKED | 409 | **B18.** A permanent deletion was refused by a foreign key the cleanup does not know about; the whole request rolled back, nothing was deleted. The response never carries `details`; the offending constraint and table names are written to the server log only (`docs/ADMIN_TEAM_DELETION.md` §6) |
 | TEAM_NOT_STARTED / TEAM_ENDED | 409 | Terminal or not-yet-started team |
 | ALREADY_SUBMITTED | 409 | "Team already submitted." |
 | THEME_ALREADY_UNLOCKED | 409 | No charge made |
@@ -126,6 +127,10 @@ An admin is authorised for a team iff `teams.admin_id = principal.staff_id`. The
 | Method & path | Body | Engine function | Notes |
 |---------------|------|-----------------|-------|
 | `POST /api/super/admins` | `{username, password, confirmPassword}` | `create_admin` | There is **no** public registration route anywhere. **Implemented in B12:** Super Admin only; `Idempotency-Key` required; role is always ADMIN and the account is active; `display_name` is set to the username (no `displayName` field); `data: {admin:{id, username, role, is_active, created_at}}`; `409 USERNAME_TAKEN` |
+| `GET /api/super/admins` | — | `list_deletable_admins` | **B18.** Super Admin only. Every ADMIN (never the Super Admin): `data: {admins:[{id, username, is_active, team_count, created_at}]}`. See `ADMIN_TEAM_DELETION.md` |
+| `GET /api/super/teams` | — | `list_deletable_teams` | **B18.** Super Admin only. Every team of every admin: `data: {teams:[{id, team_code, name, login_id, status, admin_username, member_count, created_at}]}` |
+| `POST /api/super/admins/delete` | `{adminIds:[uuid]}` (strict, 1–100 distinct) | `delete_admins` | **B18.** Super Admin only; `Idempotency-Key` required. Permanently deletes the admins, their teams and everything those teams own, in ONE transaction. `data: {deleted:{admins, teams}, admin_ids}`. `403` when the selection holds the Super Admin or a non-ADMIN; `404 NOT_FOUND` when any id does not exist (nothing is deleted); `409 DELETE_BLOCKED` |
+| `POST /api/super/teams/delete` | `{teamIds:[uuid]}` (strict, 1–100 distinct) | `delete_teams` | **B18.** As above for teams of any admin. `data: {deleted:{teams}, team_ids}` |
 | `PATCH /api/super/admins/:id` | `{isActive}` | `set_admin_active` | Disabling revokes that admin's sessions and reassigns nothing automatically; the UI prompts to reassign (`DEC-24`) |
 | `POST /api/super/teams/:teamId/reassign` | `{adminId}` | `reassign_team` | Audited |
 | `POST /api/super/competition/status` | `{action:'open'\|'pause'\|'resume'\|'end', confirm:true}` (strict) | `set_competition_status` | **Implemented in B10.** Super Admin only (an Admin gets `403`). Requires `Idempotency-Key`. `data: {changed, action, from, to, paused_seconds?, teams_shifted?, teams_ended?, teams_total?, competition:{status, opened_at, paused_at, ended_at, state_version}}`. Legal: `open` from `SETUP`, `pause` from `RUNNING`, `resume` from `PAUSED`, `end` from `RUNNING`/`PAUSED`; asking for the status the competition already has is a no-op (`changed:false`); anything else is `409 INVALID_COMPETITION_TRANSITION`. See `STATE_MACHINE.md` §2 |

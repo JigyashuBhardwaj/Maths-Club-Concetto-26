@@ -5,6 +5,7 @@
 // so the production code path is unchanged: there is no test switch inside the application. This process implements
 // the four authentication functions of migration 11 (participant_login, staff_login, resolve_session, revoke_session)
 // and the four provisioning functions of migration 13 (create_admin, create_team, list_admin_teams; get_leaderboard moved to fake-gameplay.mjs in B16, where the score lives)
+// and the four B18 functions of migration 20 (list_deletable_admins/teams, delete_admins/teams) with the same rules and result shapes
 // with the same rules and the same JSON result shapes as the SQL. The SQL itself is proven by supabase/tests/70_auth
 // and 90_provisioning (and by the real-PostgreSQL cross-check described in docs/PROVISIONING.md).
 //
@@ -51,7 +52,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
   const staff = new Map(
     identities.staff.map((s) => [
       s.username.toLowerCase(),
-      { id: randomUUID(), active: true, ...s },
+      { id: randomUUID(), active: true, createdAt: now(), ...s },
     ]),
   );
   // The pre-existing teams belong to the first ADMIN of the identities (like a team an Admin created earlier).
@@ -168,6 +169,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         role: "ADMIN",
         active: true,
         createdBy: caller.id,
+        createdAt: now(),
       };
       staff.set(name.toLowerCase(), admin);
       audit.push({ type: "ADMIN_CREATED", staffId: caller.id, entityId: admin.id });
@@ -281,6 +283,167 @@ export function createFakeBackend(identities, now = () => Date.now()) {
     },
   };
 
+  // ---- migration 20 (B18): the Super Admin permanently deletes Admins and Teams ---------------------------------------
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const superCaller = (id) => {
+    const caller = staffById(id);
+    if (!caller || caller.role !== "SUPER_ADMIN" || !caller.active) throw new AppError("FORBIDDEN");
+    return caller;
+  };
+  /** deletion_selection: 1..100 distinct, well-formed ids (sorted). */
+  function selection(ids, field) {
+    const bad = () => new AppError("VALIDATION_FAILED", { fields: [field] });
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 100) throw bad();
+    if (ids.some((x) => typeof x !== "string" || !UUID_RE.test(x))) throw bad();
+    const lower = ids.map((x) => x.toLowerCase());
+    if (new Set(lower).size !== lower.length) throw bad();
+    return lower.sort();
+  }
+  /**
+   * app.erase_teams: the team, its members, its sessions, its gameplay state (drafts, submissions, ledger, purchases all live
+   * on the team object here), its own idempotency scope, the Super/Admin replies that created it, and its login throttle go.
+   */
+  function eraseTeams(teamIds, actor) {
+    for (const id of teamIds) {
+      const entry = [...teams.entries()].find(([, t]) => t.id === id);
+      if (!entry) continue;
+      const [loginKey, t] = entry;
+      for (const [hash, sess] of sessions) {
+        if (sess.kind === "MEMBER" && sess.team.id === t.id) sessions.delete(hash);
+      }
+      for (const [k, v] of [...requestLog]) {
+        if (
+          k.startsWith(`${t.id}|`) ||
+          (v.operation === "create_team" && v.response?.team?.id === t.id)
+        ) {
+          requestLog.delete(k);
+        }
+      }
+      throttle.delete(`team:${loginKey}`);
+      for (const m of t.members) admissions.delete(m.admissionNo);
+      audit.push({
+        type: "TEAM_DELETED",
+        staffId: actor.id,
+        teamId: t.id,
+        payload: { team_code: t.code, login_id: t.loginId },
+      });
+      teams.delete(loginKey);
+    }
+  }
+  /**
+   * Test-only "a record somewhere still references this one" (what a foreign key does in migration 20): a blocker names a
+   * target (an admin username or a team code), optionally a partner of the same kind whose rows hold the reference, and
+   * the constraint/table the SQL would report. A deletion that selects the target but not the partner is refused with
+   * DELETE_BLOCKED BEFORE anything changes (the SQL rolls the whole statement back), and nothing is stored for the
+   * Idempotency-Key. Selecting target and partner together succeeds, like the real foreign keys.
+   */
+  const blockers = [];
+  function checkBlockers(kind, ids) {
+    const idOf = (name) =>
+      kind === "admin"
+        ? staff.get(String(name).toLowerCase())?.id
+        : [...teams.values()].find((t) => t.code === name)?.id;
+    for (const b of blockers) {
+      if (b.kind !== kind) continue;
+      const target = idOf(b.target);
+      if (!target || !ids.includes(target)) continue;
+      const partner = b.partner === undefined ? undefined : idOf(b.partner);
+      if (b.partner !== undefined && (!partner || ids.includes(partner))) continue;
+      throw new AppError("DELETE_BLOCKED", { constraint: b.constraint, table: b.table });
+    }
+  }
+  const deletion = {
+    list_deletable_admins(a) {
+      superCaller(a.p_staff_id);
+      return {
+        admins: [...staff.values()]
+          .filter((u) => u.role === "ADMIN")
+          .sort(
+            (x, y) => (x.createdAt ?? 0) - (y.createdAt ?? 0) || (x.username < y.username ? -1 : 1),
+          )
+          .map((u) => ({
+            id: u.id,
+            username: u.username,
+            is_active: u.active,
+            team_count: [...teams.values()].filter((t) => t.adminId === u.id).length,
+            created_at: u.createdAt ?? 0,
+          })),
+      };
+    },
+    list_deletable_teams(a) {
+      superCaller(a.p_staff_id);
+      return {
+        teams: [...teams.values()]
+          .sort((x, y) => (x.code < y.code ? -1 : x.code > y.code ? 1 : 0))
+          .map((t) => ({
+            id: t.id,
+            team_code: t.code,
+            name: t.name,
+            login_id: t.loginId,
+            status: t.status,
+            admin_username: staffById(t.adminId)?.username ?? "unknown",
+            member_count: t.members.length,
+            created_at: t.createdAt,
+          })),
+      };
+    },
+    delete_teams(a) {
+      const caller = superCaller(a.p_staff_id);
+      const fingerprint = `teams:${[...new Set((a.p_team_ids ?? []).filter(Boolean).map(String))].sort().join(",")}`;
+      const replay = idemLookup(caller.id, a.p_idem_key, "delete_teams", fingerprint);
+      if (replay) return { ...replay, replayed: true };
+      const ids = selection(a.p_team_ids, "teamIds");
+      const live = new Set([...teams.values()].map((t) => t.id));
+      if (!ids.every((id) => live.has(id))) throw new AppError("NOT_FOUND");
+      checkBlockers("team", ids);
+      eraseTeams(ids, caller);
+      audit.push({ type: "TEAMS_DELETED", staffId: caller.id });
+      const response = { replayed: false, deleted: { teams: ids.length }, team_ids: ids };
+      idemStore(caller.id, a.p_idem_key, "delete_teams", fingerprint, response);
+      return response;
+    },
+    delete_admins(a) {
+      const caller = superCaller(a.p_staff_id);
+      const fingerprint = `admins:${[...new Set((a.p_admin_ids ?? []).filter(Boolean).map(String))].sort().join(",")}`;
+      const replay = idemLookup(caller.id, a.p_idem_key, "delete_admins", fingerprint);
+      if (replay) return { ...replay, replayed: true };
+      const ids = selection(a.p_admin_ids, "adminIds");
+      const targets = ids.map((id) => staffById(id));
+      if (targets.some((u) => !u)) throw new AppError("NOT_FOUND");
+      if (targets.some((u) => u.role !== "ADMIN")) throw new AppError("FORBIDDEN");
+      checkBlockers("admin", ids);
+      const teamIds = [...teams.values()]
+        .filter((t) => ids.includes(t.adminId))
+        .map((t) => t.id)
+        .sort();
+      eraseTeams(teamIds, caller);
+      for (const u of targets) {
+        for (const [hash, sess] of sessions) {
+          if (sess.kind === "STAFF" && sess.staff.id === u.id) sessions.delete(hash);
+        }
+        for (const [k, v] of [...requestLog]) {
+          if (
+            k.startsWith(`${u.id}|`) ||
+            (v.operation === "create_admin" && v.response?.admin?.id === u.id)
+          ) {
+            requestLog.delete(k);
+          }
+        }
+        throttle.delete(`staff:${u.username.toLowerCase()}`);
+        audit.push({ type: "ADMIN_DELETED", staffId: caller.id, entityId: u.id });
+        staff.delete(u.username.toLowerCase());
+      }
+      audit.push({ type: "ADMINS_DELETED", staffId: caller.id });
+      const response = {
+        replayed: false,
+        deleted: { admins: ids.length, teams: teamIds.length },
+        admin_ids: ids,
+      };
+      idemStore(caller.id, a.p_idem_key, "delete_admins", fingerprint, response);
+      return response;
+    },
+  };
+
   // Migration 14: competition entry, team state, unlock, questions, drafts, submissions, controlled review.
   const gameplay = createGameplay({
     teams,
@@ -295,6 +458,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
 
   const functions = {
     ...provisioning,
+    ...deletion,
     ...gameplay.functions,
     participant_login(a) {
       needHash(a.p_token_hash);
@@ -375,6 +539,13 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         s.revoked = true;
         return { ok: false, code: "UNAUTHENTICATED" };
       }
+      // B18: a session whose account was deleted is refused (the rows are removed with the account; this is the belt)
+      if (s.kind === "STAFF" && staff.get(s.staff.username.toLowerCase())?.id !== s.staff.id) {
+        return { ok: false, code: "UNAUTHENTICATED" };
+      }
+      if (s.kind === "MEMBER" && teams.get(s.team.loginId.toLowerCase())?.id !== s.team.id) {
+        return { ok: false, code: "UNAUTHENTICATED" };
+      }
       s.lastSeen = now(); // resolve_session stamps sessions.last_seen_at: this is what presence is derived from
       return principalJson(s);
     },
@@ -417,6 +588,13 @@ export function createFakeBackend(identities, now = () => Date.now()) {
     competition({ loginId, status }) {
       return gameplay.controls.setCompetition({ loginId, status });
     },
+    /** The id of a staff account by username (tests need it to prove the Super Admin cannot be selected). */
+    /** @param {{ username: string }} who */
+    staffId({ username }) {
+      const u = staff.get(String(username).toLowerCase());
+      if (!u) throw new AppError("unknown staff");
+      return u.id;
+    },
     /** Disables / re-enables a staff account (its live sessions then stop resolving, as in resolve_session). */
     staffActive({ username, active }) {
       const u = staff.get(String(username).toLowerCase());
@@ -439,6 +617,28 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         }
       }
       return { silenced: n };
+    },
+    /**
+     * Plants a deletion blocker (see `checkBlockers`). `kind` is "admin" or "team"; `target` an admin username or a team
+     * code; `partner` (optional) another one of the same kind whose rows hold the reference.
+     * @param {{ kind: "admin"|"team", target: string, partner?: string, constraint: string, table: string }} b
+     */
+    blockDeletion(b) {
+      if (!["admin", "team"].includes(b.kind)) throw new AppError("bad blocker kind");
+      blockers.push({ ...b });
+      return { blockers: blockers.length };
+    },
+    /**
+     * Removes the blockers planted for one target (the offending reference was cleaned up). Per target, never global:
+     * the stand-in is shared by tests running in parallel.
+     * @param {{ kind: "admin"|"team", target: string }} b
+     */
+    unblockDeletion(b) {
+      const keep = blockers.filter((x) => !(x.kind === b.kind && x.target === b.target));
+      const removed = blockers.length - keep.length;
+      blockers.length = 0;
+      blockers.push(...keep);
+      return { removed };
     },
     /** Row counts, so a test can prove that a retry or a rejected request created nothing. */
     counts() {

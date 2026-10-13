@@ -144,8 +144,11 @@ test.describe("question page", () => {
       await admin.api.dispose();
     }
     await expect(page.getByRole("button", { name: "Approved" })).toBeDisabled({ timeout: 20_000 });
+    // the Approved button (question detail) and the coin counter (team state) come from two independent ~5 s polls, so the
+    // coins can trail the button by a full poll: wait as long as for the button
     await expect(page.getByRole("group", { name: "Coins left" })).toContainText(
       String(400 + rewardOf("A.1")),
+      { timeout: 20_000 },
     );
     await page.getByRole("link", { name: "Next question" }).click();
     await page.waitForURL("**/theme/A/2");

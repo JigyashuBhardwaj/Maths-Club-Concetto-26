@@ -54,6 +54,7 @@ describe("error codes", () => {
       TEAM_CODE_TAKEN: 409,
       LOGIN_ID_TAKEN: 409,
       ADMISSION_NO_TAKEN: 409,
+      DELETE_BLOCKED: 409,
       THEME_ALREADY_UNLOCKED: 409,
       THEME_LOCKED: 409,
       INSUFFICIENT_COINS: 409,

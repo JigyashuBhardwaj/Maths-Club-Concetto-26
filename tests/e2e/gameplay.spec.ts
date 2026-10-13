@@ -187,7 +187,7 @@ test.describe("gameplay: two members of one team", () => {
     await one.goto("/participant/theme/B/1");
     await expect(one.locator(".q-text")).toContainText(firstLine("B.1"), LOAD);
     await expect(one.getByRole("button", { name: /start/i })).toHaveCount(0);
-    await expect(questionTimer(one)).toHaveText(/0[34]:\d\d/);
+    await expect(questionTimer(one)).toHaveText(/0[34]:\d\d/, LOAD);
     const started = (await inspect(team)).questions[String(B1)]!;
     expect(started.state).toBe("ACTIVE");
     expect(started.deadline).not.toBeNull();
@@ -195,7 +195,7 @@ test.describe("gameplay: two members of one team", () => {
     // the second member opens the same page later: same body, same deadline, no restart
     await two.goto("/participant/theme/B/1");
     await expect(two.locator(".q-text")).toContainText(firstLine("B.1"), LOAD);
-    await expect(questionTimer(two)).toHaveText(/0[34]:\d\d/);
+    await expect(questionTimer(two)).toHaveText(/0[34]:\d\d/, LOAD);
     // both pages count down to the SAME server deadline (the browser, the app server and the stand-in share one clock;
     // a page that is busy rendering lags by a few ticks, never by a different deadline)
     for (const page of [one, two]) {
@@ -308,14 +308,19 @@ test.describe("gameplay: two members of one team", () => {
       await expect(page.getByRole("button", { name: "Approved" })).toBeDisabled({
         timeout: 20_000,
       });
+      // the question page (Approved) and the coin counter come from two independent polls (question detail, team state;
+      // each ~5 s), so the coins can trail the button by a full poll: wait as long as for the button
       await expect(page.getByRole("group", { name: "Coins left" })).toContainText(
         String(after.coins),
+        {
+          timeout: 20_000,
+        },
       );
     }
     await one.getByRole("link", { name: "Next question" }).click();
     await one.waitForURL("**/theme/B/2");
     await expect(one.locator(".q-text")).toContainText(firstLine("B.2"), LOAD);
-    await expect(questionTimer(one)).toHaveText(/0[34]:\d\d/);
+    await expect(questionTimer(one)).toHaveText(/0[34]:\d\d/, LOAD);
     await expect(one.getByRole("textbox")).toBeEditable();
   });
 

@@ -50,6 +50,7 @@ const rows = (sql) => JSON.parse(must(sql) || "null");
 
 const migrations = readdirSync(join(root, "supabase/migrations"))
   .filter((f) => f.endsWith(".sql"))
+  .filter((f) => f < "20261006000020") // later migrations (B18+) are not part of this baseline
   .sort();
 const B17 = migrations.filter((f) => /^20261006000019_/.test(f));
 const BEFORE = migrations.filter((f) => !B17.includes(f));

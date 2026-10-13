@@ -61,6 +61,7 @@ const q = (url, sql) => {
 const migDir = join(root, "supabase/migrations");
 const migrations = readdirSync(migDir)
   .filter((f) => f.endsWith(".sql"))
+  .filter((f) => f < "20261006000020") // later migrations (B18+) are not part of this baseline
   .sort();
 const official = migrations.filter((f) => /^20261006000019_/.test(f));
 assert.equal(official.length, 1, "migration 19");
