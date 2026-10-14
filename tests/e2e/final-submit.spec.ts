@@ -12,6 +12,7 @@ import {
   signInMember,
 } from "./support/game";
 import type { E2ETeam } from "./support/identities";
+import { fullscreenSettled } from "./support/fullscreen-shim";
 import { rewardOf } from "./support/official";
 
 /**
@@ -133,6 +134,7 @@ test.describe("Final Submit (browser)", () => {
     await signInMember(page.context(), team, 1);
     await page.goto("/participant");
     const open = async () => {
+      await fullscreenSettled(page);
       const ticket = page.getByRole("button", { name: "FINAL SUBMIT" });
       await ticket.focus();
       await page.keyboard.press("Enter");

@@ -8,6 +8,7 @@ import {
   player,
   signInMember,
 } from "./support/game";
+import { fullscreenSettled } from "./support/fullscreen-shim";
 import type { E2ETeam } from "./support/identities";
 import { officialQuestion, officialRules, officialTheme } from "./support/official";
 import { signInSharedParticipant } from "./support/session";
@@ -22,6 +23,7 @@ test.describe.configure({ timeout: 120_000 });
 const THEMES = [..."ABCDEFGHIJ"];
 
 async function openTicket(page: Page, name: string) {
+  await fullscreenSettled(page);
   const ticket = page.getByRole("button", { name, exact: true });
   await ticket.focus();
   await page.keyboard.press("Enter");

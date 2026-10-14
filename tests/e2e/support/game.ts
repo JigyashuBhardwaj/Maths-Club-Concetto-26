@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { request, type APIRequestContext, type BrowserContext } from "@playwright/test";
 
+import { installFullscreenShim } from "./fullscreen-shim";
 import type { E2ETeam } from "./identities";
 import { control, loginForCookies, participantCredentials, staffCredentials } from "./session";
 
@@ -63,12 +64,16 @@ export async function signInMember(
   context: BrowserContext,
   team: E2ETeam,
   slot: 1 | 2 | 3 | 4,
+  /** `false` only in tests/e2e/fullscreen.spec.ts, which tests the REAL browser fullscreen. */
+  opts: { mockFullscreen?: boolean } = {},
 ): Promise<Cookies> {
   const cookies = await loginForCookies(
     "/api/auth/participant/login",
     participantCredentials(team, slot),
   );
   await context.addCookies(cookies);
+  // B19: these specs test the competition, not the browser, so fullscreen is the labelled mock (see fullscreen-shim.ts)
+  if (opts.mockFullscreen !== false) await installFullscreenShim(context);
   return cookies;
 }
 

@@ -13,6 +13,7 @@ import {
 
 import type { TeamState } from "@/lib/contracts/runtime";
 import { fetchTeamState, sendHeartbeat } from "@/lib/gameplay/client";
+import { participantLoginUrl } from "@/lib/fullscreen/session-end";
 import { clockOffset, isNewer, serverTime } from "@/lib/gameplay/derive";
 
 /** Until realtime ships (REALTIME_SPEC), polling is the whole sync path: 5 s ± 1 s while the tab is visible. */
@@ -87,8 +88,9 @@ export function GameProvider({
         return;
       }
       if (r.status === 401) {
-        // The session ended (signed out elsewhere, revoked, expired): leave through the normal login page.
-        navigate("/login/participant");
+        // The session ended (signed out elsewhere, revoked, expired): leave through the normal login page. After a
+        // fullscreen exit the page says why (the flag is set the moment that logout begins).
+        navigate(participantLoginUrl());
         return;
       }
       if (stateRef.current) setReconnecting(true);

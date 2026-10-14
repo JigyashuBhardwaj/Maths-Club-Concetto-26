@@ -3,11 +3,13 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { beginTheme, createPlayerTeam, inspect, signInMember } from "./support/game";
+import { fullscreenSettled } from "./support/fullscreen-shim";
 import { signInSharedParticipant, teamFor } from "./support/session";
 import { officialRules, officialTheme } from "./support/official";
 
 /** The ring is always drifting, so open a ticket the way a keyboard user would: focus it, press Enter. */
 async function openTicket(page: Page, name: string) {
+  await fullscreenSettled(page);
   const ticket = page.getByRole("button", { name, exact: true });
   await ticket.focus();
   await page.keyboard.press("Enter");
@@ -34,17 +36,27 @@ test.describe("participant home", () => {
     for (const alt of ["IIT (ISM) Dhanbad", "Event mark", "Mathematics Club IIT (ISM)"]) {
       await expect(page.getByRole("img", { name: alt })).toBeVisible();
     }
-    // B13: the numbers are the server's. The shared team entered the competition in global setup, so its team timer is
-    // running (just under 04:00:00) and it still holds the starting 500 coins. B16: its rank and score are the server's too.
-    await expect(page.locator(".home-stats .stat-value").first()).toHaveText(/^0[34]:\d\d:\d\d$/);
-    await expect(page.locator(".home-stats .stat-value").nth(1)).toHaveText("500");
+    // B13: the numbers are the server's. The shared team entered the competition once, in global setup, and still holds
+    // its starting 500 coins. Its clock and its score keep moving for as long as the suite runs (the score loses 5 per
+    // elapsed minute), so the expectations are READ from the database for this very team, never written as constants
+    // that only hold for the first minutes of a run. The page may lag the database by one poll, hence the tolerances.
+    const shared = await inspect(teamFor(info));
+    expect(shared.status).toBe("RUNNING");
+    await expect(page.locator(".home-stats .stat-value").nth(1)).toHaveText(String(shared.coins));
+    const clock = (await page.locator(".home-stats .stat-value").first().innerText()).match(
+      /^(\d\d):(\d\d):(\d\d)$/,
+    );
+    expect(clock).not.toBeNull();
+    const shownLeft = Number(clock![1]) * 3600 + Number(clock![2]) * 60 + Number(clock![3]);
+    expect(Math.abs(shownLeft - (shared.endsAt! - Date.now()) / 1000)).toBeLessThan(30);
     await expect(page.getByRole("heading", { name: "Live Leaderboard" })).toBeVisible();
     await expect(page.getByLabel("Your rank")).toHaveText(/^#\d+$/);
     await expect(page.getByLabel("Your team ID")).toHaveText(teamFor(info).code);
-    // 500 coins and nothing solved: 500 minus 5 per elapsed minute (the team started moments ago in global setup)
+    // B16: nothing solved, so the score is the coins minus 5 per elapsed minute, and it is the database's number
     const score = Number(await page.getByLabel("Your score").innerText());
-    expect(score).toBeLessThanOrEqual(500);
-    expect(score).toBeGreaterThan(400);
+    const official = (await inspect(teamFor(info))).score;
+    expect(Math.abs(score - official)).toBeLessThanOrEqual(10);
+    expect(score).toBeLessThanOrEqual(shared.coins);
     for (const name of [...ticketNames, "FINAL SUBMIT"]) {
       await expect(page.getByRole("button", { name, exact: true })).toBeAttached();
     }

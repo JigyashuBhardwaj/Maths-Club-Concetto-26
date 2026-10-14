@@ -129,7 +129,24 @@ export function createStaffLoginHandler(deps: AuthDeps) {
     });
 }
 
-/** POST /api/auth/logout — idempotent: always clears the cookie and answers 200, whether or not a session existed. */
+/**
+ * `revoke_session` answers `{ ok: true, revoked: boolean }` for every outcome that is not a failure: `revoked: true`
+ * when it ended a live session, `revoked: false` when there was nothing to end (unknown, expired or already revoked).
+ * Anything else is not a confirmation: null, an array, a missing or non-boolean `revoked`, `ok` other than `true`.
+ */
+function isRevokeConfirmation(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
+  const answer = raw as { ok?: unknown; revoked?: unknown };
+  return answer.ok === true && typeof answer.revoked === "boolean";
+}
+
+/**
+ * POST /api/auth/logout — idempotent for every session that is already gone: with no cookie, or an unknown, expired or
+ * already revoked session, it clears the cookie and answers 200 (`revoke_session` answers `ok` for all of those and
+ * reveals nothing). It answers 200 ONLY when the database confirmed that outcome. If the database call fails, or
+ * does not answer `{ ok: true, revoked: <boolean> }`, the session may still be live, so the answer is the generic 503
+ * and the cookie is left alone: callers (the fullscreen-exit logout among them) must not treat it as a sign-out.
+ */
 export function createLogoutHandler(deps: AuthDeps) {
   return (request: Request): Promise<Response> =>
     respond(deps.now, async () => {
@@ -137,9 +154,12 @@ export function createLogoutHandler(deps: AuthDeps) {
       assertSameOrigin(request, env.APP_ORIGIN);
       const token = readSessionToken(request.headers.get("cookie"));
       if (token) {
-        await deps.db().rpc("revoke_session", {
+        const raw = await deps.db().rpc("revoke_session", {
           p_token_hash: hashSessionToken(token, env.SESSION_TOKEN_PEPPER),
         });
+        if (!isRevokeConfirmation(raw)) {
+          throw new ApiError("SERVICE_UNAVAILABLE", "Temporarily unavailable. Please retry.");
+        }
       }
       const headers = new Headers();
       headers.append("Set-Cookie", buildClearedSessionCookie());

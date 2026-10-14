@@ -1,5 +1,6 @@
 import { expect, request, test, type Page } from "@playwright/test";
 
+import { fullscreenSettled, installFullscreenShim } from "./support/fullscreen-shim";
 import {
   control,
   participantCredentials,
@@ -204,6 +205,7 @@ test.describe("participant sign-in (browser)", () => {
   }, info) => {
     const team = teamFor(info);
     const creds = participantCredentials(team, 3);
+    await installFullscreenShim(page.context()); // B19: the fullscreen gate is passed (mock); this test is about sign-out
     await page.goto("/login/participant");
     await fillParticipant(page, creds);
     await page.getByRole("button", { name: "Sign in" }).click();
@@ -211,6 +213,7 @@ test.describe("participant sign-in (browser)", () => {
     const token = (await sessionCookie(page))!.value;
     expect((await control("liveSessions", { admissionNo: creds.admissionNo })).live).toBe(1);
 
+    await fullscreenSettled(page);
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.waitForURL("**/login/participant");
     expect(await sessionCookie(page)).toBeUndefined(); // the cookie is cleared

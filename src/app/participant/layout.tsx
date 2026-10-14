@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { EntryGate } from "@/components/game/entry-gate";
+import { FullscreenProvider } from "@/components/game/fullscreen-provider";
 import { GameBanner } from "@/components/game/game-banner";
 import { GameProvider } from "@/components/game/game-provider";
 import { requireArea } from "@/lib/auth/guard";
@@ -21,9 +22,11 @@ export default async function Layout({ children }: { children: ReactNode }) {
       : null;
   return (
     <GameProvider initial={initial}>
-      <GameBanner />
-      {children}
-      <EntryGate />
+      <FullscreenProvider>
+        <GameBanner />
+        {children}
+        <EntryGate />
+      </FullscreenProvider>
     </GameProvider>
   );
 }

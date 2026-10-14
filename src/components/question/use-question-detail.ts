@@ -7,6 +7,7 @@ import { enterQuestionCall, fetchQuestion } from "@/lib/gameplay/client";
 import { gameErrorText, isRetryable } from "@/lib/gameplay/messages";
 import { newIdempotencyKey } from "@/lib/provisioning/client";
 
+import { useFullscreen } from "@/components/game/fullscreen-provider";
 import { useGame } from "@/components/game/game-provider";
 
 export interface QuestionDetail {
@@ -22,14 +23,18 @@ export interface QuestionDetail {
 /**
  * Loads one question for the signed-in team. An AVAILABLE question is ENTERED (there is no Start button: opening the
  * page starts its timer, once, on the server; a second member opening it gets the same deadline). Every other
- * non-LOCKED state is simply read. The question is read again whenever the team snapshot changes (a teammate's draft,
- * an approval, a timeout), and responses that arrive out of order are dropped.
+ * non-LOCKED state is simply read. B19: nothing is entered or read until `ready`: fullscreen is established, or the team
+ * has legitimately finished (read-only). Before the snapshot has arrived, before the team has started and after leaving
+ * fullscreen it is not ready, so a question is never activated, or its text fetched, behind the fullscreen gate. The
+ * question is read again whenever the team snapshot changes (a teammate's draft, an approval, a timeout), and
+ * responses that arrive out of order are dropped.
  */
 export function useQuestionDetail(
   questionId: number | undefined,
   summaryState: string | undefined,
 ): QuestionDetail {
   const { state, refresh } = useGame();
+  const { ready } = useFullscreen();
   const [question, setQuestion] = useState<Question | null>(null);
   const [error, setError] = useState<string | null>(null);
   const seq = useRef(0);
@@ -39,6 +44,7 @@ export function useQuestionDetail(
 
   useEffect(() => {
     if (questionId === undefined || !summaryState || summaryState === "LOCKED") return;
+    if (!ready) return;
     const mine = ++seq.current;
     let cancelled = false;
     void (async () => {
@@ -67,7 +73,7 @@ export function useQuestionDetail(
     return () => {
       cancelled = true;
     };
-  }, [questionId, summaryState, version, nonce, refresh]);
+  }, [questionId, summaryState, version, nonce, refresh, ready]);
 
   const adopt = useCallback((q: Question) => {
     seq.current += 1;

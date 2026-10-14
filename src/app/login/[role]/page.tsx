@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { LoginForm } from "@/components/auth/login-form";
+import { LoginNotice } from "@/components/auth/login-notice";
 import { GlassPanel } from "@/components/ui/glass-panel";
 import { getRole, isRoleId, ROLE_IDS } from "@/lib/roles";
 
@@ -35,6 +36,7 @@ export default async function LoginPage({ params }: Props) {
       <GlassPanel className="w-full max-w-sm p-8 text-center">
         <p className="text-[11px] font-semibold tracking-[0.3em] text-orange uppercase">{label}</p>
         <h1 className="mt-3 text-xl font-semibold text-ink">Sign-in</h1>
+        {role === "participant" ? <LoginNotice /> : null}
         <LoginForm role={role} />
         <Link
           href="/"

@@ -262,9 +262,9 @@ describe("EntryGate", () => {
     expect(c.enterCompetition).toHaveBeenCalledTimes(1);
     expect(c.enterCompetition.mock.calls[0]![0]).toMatch(/^[0-9a-f-]{36}$/);
   });
-  it("is absent once the team has started", () => {
+  it("is absent once the team has started (and the participant has passed the fullscreen gate)", async () => {
     withGame(<EntryGate />, snapshot());
-    expect(document.querySelector("dialog.entry-gate")).toBeNull();
+    await waitFor(() => expect(document.querySelector("dialog.entry-gate")).toBeNull());
   });
   it("cannot be used while the competition is paused", async () => {
     withGame(

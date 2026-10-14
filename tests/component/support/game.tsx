@@ -1,9 +1,13 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { vi } from "vitest";
 
+import { FullscreenProvider, useFullscreen } from "@/components/game/fullscreen-provider";
 import { GameProvider } from "@/components/game/game-provider";
 import type { BuyTime, Hint, Question } from "@/lib/contracts/gameplay";
 import type { TeamState } from "@/lib/contracts/runtime";
+import type { FullscreenDriver } from "@/lib/fullscreen/driver";
+
+import { makeFullscreenDriver } from "./fullscreen";
 
 /** Shared fixtures for the participant component tests: a team snapshot builder and a mocked gameplay client. */
 export const NOW = 1_760_000_000_000;
@@ -162,6 +166,42 @@ export function makeEconomy() {
   };
 }
 
-export function Game({ initial, children }: { initial: TeamState | null; children: ReactNode }) {
-  return <GameProvider initial={initial}>{children}</GameProvider>;
+/** Stands in for the participant who has already pressed the fullscreen gate (B19): fullscreen is established. */
+function PassedFullscreenGate() {
+  const { enter } = useFullscreen();
+  useEffect(() => {
+    void enter();
+  }, [enter]);
+  return null;
+}
+
+/**
+ * The game state plus the fullscreen provider, as the participant layout mounts them. By default the participant has
+ * already entered fullscreen (a fake driver that is active), so the pre-B19 behaviour under test is unchanged; tests of
+ * the gate itself pass `fullscreen` (a harness from ./fullscreen) and `passedGate={false}`.
+ */
+export function Game({
+  initial,
+  children,
+  fullscreen,
+  passedGate = true,
+  navigate,
+  fetchImpl,
+}: {
+  initial: TeamState | null;
+  children: ReactNode;
+  fullscreen?: FullscreenDriver;
+  passedGate?: boolean;
+  navigate?: (url: string) => void;
+  fetchImpl?: typeof fetch;
+}) {
+  const driver = fullscreen ?? makeFullscreenDriver({ active: true }).driver;
+  return (
+    <GameProvider initial={initial}>
+      <FullscreenProvider driver={driver} navigate={navigate} fetchImpl={fetchImpl}>
+        {passedGate ? <PassedFullscreenGate /> : null}
+        {children}
+      </FullscreenProvider>
+    </GameProvider>
+  );
 }

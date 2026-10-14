@@ -378,6 +378,68 @@ describe("POST /api/auth/logout", () => {
     const res = await createLogoutHandler(deps(db))(withCookie());
     expect(res.status).toBe(503);
   });
+
+  // B19-r2: a 200 is a claim that the session is gone. It may only be made when the database said so.
+  it("a failed revocation is never a 200: generic 503, the cookie is NOT cleared, and nothing internal or secret leaks", async () => {
+    const failing = new DbError("revoke_session", "57014");
+    const { db } = fakeDb(() => failing);
+    const res = await createLogoutHandler(deps(db))(withCookie());
+    expect(res.status).toBe(503);
+    expect(res.headers.get("set-cookie")).toBeNull(); // the session may still be live: do not pretend it ended
+    const text = await res.text();
+    expect(JSON.parse(text)).toMatchObject({ ok: false, error: { code: "SERVICE_UNAVAILABLE" } });
+    for (const secret of [token, hashSessionToken(token, PEPPER), "57014", "revoke_session"]) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
+  it.each([
+    ["nothing", undefined],
+    ["null", null],
+    ["a string", "ok"],
+    ["a number", 1],
+    ["an empty array", []],
+    ["an array holding a valid answer", [{ ok: true, revoked: true }]],
+    ["an empty object", {}],
+    ["ok: true but no revoked", { ok: true }],
+    ["revoked as the string 'false'", { ok: true, revoked: "false" }],
+    ["revoked as the string 'true'", { ok: true, revoked: "true" }],
+    ["revoked as a number", { ok: true, revoked: 1 }],
+    ["revoked as null", { ok: true, revoked: null }],
+    ["ok: false", { ok: false }],
+    ["ok: false with revoked: false", { ok: false, revoked: false }],
+    ["ok as a string", { ok: "true", revoked: true }],
+    ["ok as 1", { ok: 1, revoked: true }],
+    ["no ok", { revoked: true }],
+    ["a failure code", { ok: false, code: "UNAUTHENTICATED" }],
+  ])(
+    "an answer from the database that is not { ok: true, revoked: <boolean> } (%s) is not a confirmed logout: 503, cookie kept",
+    async (_label, answer) => {
+      const { db } = fakeDb(() => answer);
+      const res = await createLogoutHandler(deps(db))(withCookie());
+      expect(res.status).toBe(503);
+      expect(res.headers.get("set-cookie")).toBeNull();
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: false, error: { code: "SERVICE_UNAVAILABLE" } });
+      expect(JSON.stringify(body)).not.toMatch(/revoked|ok: true/); // the generic message echoes nothing it was given
+    },
+  );
+
+  it.each([
+    ["revoked now", { ok: true, revoked: true }],
+    [
+      "unknown, expired or already revoked (revoke_session reveals nothing)",
+      { ok: true, revoked: false },
+    ],
+  ])("idempotent success stays a 200 with the cleared cookie: %s", async (_label, answer) => {
+    const { db, calls } = fakeDb(() => answer);
+    const res = await createLogoutHandler(deps(db))(withCookie());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toBe(buildClearedSessionCookie());
+    expect(calls).toHaveLength(1);
+    // the two outcomes are indistinguishable to the caller: no session existence is revealed
+    expect((await res.json()).data).toEqual({});
+  });
 });
 
 describe("GET /api/auth/me", () => {

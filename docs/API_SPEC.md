@@ -65,14 +65,14 @@ An **idempotent replay** returns the original response (same status, same body) 
 |---------------|------|--------|-------|
 | `POST /api/auth/participant/login` | `{teamLoginId, password, admissionNo}` (strict: unknown fields → 400) | `data: {role:'PARTICIPANT', member:{id,slot}, team:{id,code,name,status}, session:{expires_at}}` + cookie | Verifies password hash **and** that `admissionNo` belongs to that team. Same generic error for any mismatch (`Invalid credentials`). Revokes the member's previous live session (`SUPERSEDED`). Does **not** start the timer. Allowed only while competition is `RUNNING` or `PAUSED` |
 | `POST /api/auth/staff/login` | `{username, password}` (strict) | `data: {role:'ADMIN'\|'SUPER_ADMIN', staff:{id,name}, session:{expires_at}}` + cookie | Rejects `is_active=false` with the same generic error. Does not supersede other sessions of the same account |
-| `POST /api/auth/logout` | — | `data:{}` + cookie cleared | Revokes the session (`LOGOUT`). Idempotent: always 200, also without a cookie or with a dead one |
+| `POST /api/auth/logout` | — | `data:{}` + cookie cleared | Revokes the session (`LOGOUT`). Idempotent: 200 also without a cookie or with an unknown, expired or already revoked one (nothing about the session is revealed). The 200 is sent only when the database confirmed (`{ok:true, revoked:<boolean>}`); if the database call fails or answers anything else the answer is the generic `503 SERVICE_UNAVAILABLE` and the cookie is **not** cleared, so a client must not treat it as a sign-out and may retry (B19-r2) |
 | `GET /api/auth/me` | — | the same `data` as login (principal summary) | Used on app load and to detect revoked sessions. Resolves the session and updates `last_seen_at`. 401 (and the cookie is cleared) if missing, malformed, expired, revoked or the staff account was disabled |
-| `POST /api/auth/violation/fullscreen-exit` | `{draft?:{questionId,answer,explanation,version}}` | `data:{}` | Participant only. Saves the draft if supplied, revokes the session (`FULLSCREEN_EXIT`), audits, pings `admin:{id}`. Also callable via `navigator.sendBeacon` |
+| `POST /api/auth/violation/fullscreen-exit` | `{draft?:{questionId,answer,explanation,version}}` | `data:{}` | **PLANNED, NOT IMPLEMENTED: no route, handler or database function exists for it. B19 ends a session after a fullscreen exit through `POST /api/auth/logout`.** Intended behaviour: participant only. Saves the draft if supplied, revokes the session (`FULLSCREEN_EXIT`), audits, pings `admin:{id}`. Also callable via `navigator.sendBeacon` |
 | `GET /api/auth/realtime-token` | — | `data:{token, expires_at}` | Short-lived JWT for the Realtime socket (`REALTIME_SPEC` §3.1) |
 
 All login endpoints are throttled **per account** (§8). Failed and successful logins are audited.
 
-**Implemented in Patch B9: `participant/login`, `staff/login`, `logout`, `me`.** `fullscreen-exit` and `realtime-token` are later phases.
+**Implemented in Patch B9: `participant/login`, `staff/login`, `logout`, `me`.** `fullscreen-exit` (planned, **not implemented**) and `realtime-token` are later phases.
 
 Details of the implemented endpoints:
 

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { request, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 
+import { installFullscreenShim } from "./fullscreen-shim";
 import { ensureIdentities, type E2ETeam } from "./identities";
 
 /** Where global-setup wrote the shared participant sessions (one per project; see identities.ts). */
@@ -62,6 +63,8 @@ export async function signInSharedParticipant(
       ? target.context()
       : (target as BrowserContext);
   await context.addCookies(state.cookies);
+  // B19: these specs test the competition, not the browser, so fullscreen is the labelled mock (see fullscreen-shim.ts)
+  await installFullscreenShim(context);
 }
 
 /** A fresh staff session (staff sessions are not unique per account, so tests never interfere). */
