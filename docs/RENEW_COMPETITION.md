@@ -81,6 +81,25 @@ ride along. The body is limited to 4 MiB. `src/lib/contracts/renewal.ts` is the 
 timers, hint prices, unlock costs and buy-time options keep their values. New Admins and teams can be provisioned straight away, and the Super Admin starts the next edition with the existing
 "open" action.
 
+**Participants cannot sign in while the competition is `SETUP`** (`COMPETITION_NOT_RUNNING`, "The competition isn't open for sign-in right now."): login is allowed only in `RUNNING` and `PAUSED`. After a renewal the
+Super Admin therefore has to open the competition deliberately, once at least one team exists. That is done from the **Competition status** panel at the top of the Superadmin dashboard (`/superadmin`), see §6b.
+
+## 6b. The lifecycle control (Superadmin dashboard)
+
+`src/components/lifecycle/competition-control.tsx` is a child of `StaffHome` on `/superadmin`. It calls the existing `POST /api/super/competition/status` (no new endpoint, no new migration): same-origin, a fresh `Idempotency-Key` UUID, body `{action, confirm:true}`.
+
+| Status    | Shown                               | Actions                                      |
+| --------- | ----------------------------------- | -------------------------------------------- |
+| `SETUP`   | Setup — participants cannot sign in | **Open competition**                         |
+| `RUNNING` | Running                             | **Pause**, **End competition** (asks first)  |
+| `PAUSED`  | Paused                              | **Resume**, **End competition** (asks first) |
+| `ENDED`   | Ended — cannot be reopened          | none (a link to "Renew the competition")     |
+
+- **Confirmation**: only `end` is confirmed ("End the competition?"), because it cannot be undone. Open, pause and resume are reversible and are not.
+- **Where the current status comes from**: `src/app/superadmin/page.tsx` (guarded by `requireStaffArea("superadmin")`, `force-dynamic`) reads it on the server through `loadCompetitionOverview` (`src/lib/runtime/server-data.ts`), which calls the existing Super-Admin-only function `get_renewal_content` with the staff id of the verified session and keeps ONLY `readiness.competition_status` and `readiness.teams` (a narrow zod schema; everything else of that payload is ignored). No status is ever taken from the client, and the database re-checks the role and the transition on every action. If the status cannot be read, the panel says so and offers **Reload** instead of guessing a status or offering actions. Trade-off: that function also computes the renewal content and readiness, which is more than the dashboard needs; a dedicated read-only SQL function would be lighter but would need a migration, so it was not added. It is a possible follow-up.
+- **Failures** (fixed wording by error code, never server text): `COMPETITION_NOT_READY` (no team yet, or incomplete content), `INVALID_COMPETITION_TRANSITION` (the panel corrects itself to the status the server reports), `FORBIDDEN`, `UNAUTHENTICATED`, network and server errors. After an unknown outcome (network error, `5xx`) a retry reuses the same `Idempotency-Key`, so it can never be applied twice; after a definite answer the next attempt gets a new key.
+- Double clicks are ignored while a request is in flight (the buttons are disabled and the panel is `aria-busy`); results are announced in a `role="status"` / `role="alert"` region.
+
 ## 6a. Authorisation
 
 `GET` and `POST /api/super/renew` and the page are Super Admin only: the layout guard (`requireStaffArea("superadmin")`), the route handler (role from the verified session; the staff id is never taken from the request) and the database functions (`app.require_super_admin` / the explicit role check) each enforce it.

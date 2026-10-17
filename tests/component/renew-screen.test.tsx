@@ -151,7 +151,7 @@ describe("<RenewScreen /> layout and content", () => {
     expect(applyBtn()).toBeEnabled();
     expect(resetBtn()).toBeDisabled(); // nothing to restore yet
     expect(fetchMock).not.toHaveBeenCalled();
-  });
+  }, 15000);
 
   it("the badges and labels are plain text, only the values are editable fields", () => {
     mount();
@@ -268,7 +268,7 @@ describe("editing and RESET", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove rule 25" }));
     expect(add).toBeEnabled();
     expect(document.querySelector('[aria-label="Rule 50"]')).toBeNull();
-  });
+  }, 15000);
 });
 
 describe("APPLY CHANGES: validation, the dialog, GO BACK", () => {

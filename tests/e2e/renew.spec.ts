@@ -33,6 +33,9 @@ async function superApi() {
   );
 }
 
+/** The participant of the team created after the renewal (set by the renewal test, used by the lifecycle tests that follow it). */
+let afterTeam: { teamLoginId: string; password: string; admissionNo: string } | null = null;
+
 async function openEditor(page: Page) {
   await signInStaff(page, "e2e_super");
   await page.goto("/superadmin");
@@ -393,6 +396,28 @@ test.describe("Renew the Competition", () => {
     expect(createdTeam.status()).toBe(200);
     await adminCtx.dispose();
     await sup.dispose();
+    afterTeam = {
+      teamLoginId: team.loginId,
+      password: team.password,
+      admissionNo: team.admission[0]!,
+    };
+
+    // The reported bug: a renewal leaves the competition in SETUP, so a participant of the brand-new team is refused ...
+    const refused = await apiCtx();
+    const attempt = await refused.post("/api/auth/participant/login", { data: afterTeam });
+    expect(attempt.status()).toBe(423);
+    expect((await attempt.json()).error.code).toBe("COMPETITION_NOT_RUNNING");
+    await refused.dispose();
+    // ... until the Super Admin opens the competition from the dashboard (no confirmation: Pause undoes it).
+    await page.goto("/superadmin");
+    await expect(page.getByTestId("competition-status")).toHaveText("Setup");
+    await expect(page.getByRole("button", { name: "Pause" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Open competition" }).click();
+    await expect(page.getByTestId("competition-notice")).toContainText(
+      "The competition is open. Participants can now sign in.",
+    );
+    await expect(page.getByTestId("competition-status")).toHaveText("Running");
+    await expect(page.getByRole("button", { name: "Open competition" })).toHaveCount(0);
 
     const cookies = await loginForCookies("/api/auth/participant/login", {
       teamLoginId: team.loginId,
@@ -414,5 +439,164 @@ test.describe("Renew the Competition", () => {
     await expect(rulesDialog).toContainText("First renewed rule.");
     await expect(rulesDialog).toContainText("Second renewed rule:");
     await participant.close();
+  });
+});
+
+/**
+ * The Superadmin lifecycle control (`/superadmin`, POST /api/super/competition/status). They run after the renewal above, whose
+ * last step opened the competition, and walk the rest of the lifecycle: RUNNING -> PAUSED -> RUNNING -> ENDED.
+ */
+test.describe("Competition lifecycle control", () => {
+  const statusOf = async () =>
+    ((await control("renewalState", {})) as { competition: { status: string } }).competition.status;
+  const participantLogin = async () => {
+    const api = await apiCtx();
+    try {
+      const res = await api.post("/api/auth/participant/login", { data: afterTeam });
+      return { status: res.status(), body: await res.json() };
+    } finally {
+      await api.dispose();
+    }
+  };
+  const statusPost = async (
+    ctx: Awaited<ReturnType<typeof apiCtx>>,
+    action: string,
+    key = crypto.randomUUID(),
+  ) =>
+    ctx.post("/api/super/competition/status", {
+      data: { action, confirm: true },
+      headers: { "Idempotency-Key": key },
+    });
+
+  test("the control is for the Superadmin only; the API refuses everybody else and changes nothing", async () => {
+    expect(afterTeam).not.toBeNull();
+    const before = await statusOf();
+    const anon = await apiCtx();
+    expect((await statusPost(anon, "pause")).status()).toBe(401);
+    await anon.dispose();
+    const participant = await apiCtx(
+      cookieHeader(await loginForCookies("/api/auth/participant/login", afterTeam!)),
+    );
+    expect((await statusPost(participant, "pause")).status()).toBe(403);
+    await participant.dispose();
+    expect(await statusOf()).toBe(before);
+  });
+
+  test("the dashboard shows the state the server holds: Running offers Pause and End, not Open or Resume", async ({
+    page,
+  }) => {
+    await signInStaff(page, "e2e_super");
+    await page.goto("/superadmin");
+    const box = page.getByTestId("competition-control");
+    await expect(box).toBeVisible();
+    await expect(page.getByTestId("competition-status")).toHaveText("Running");
+    await expect(box.getByRole("button", { name: "Pause" })).toBeEnabled();
+    await expect(box.getByRole("button", { name: "End competition" })).toBeEnabled();
+    await expect(box.getByRole("button", { name: "Open competition" })).toHaveCount(0);
+    await expect(box.getByRole("button", { name: "Resume" })).toHaveCount(0);
+    // the leaderboard and the rest of the dashboard are still there
+    await expect(page.getByRole("heading", { level: 1, name: "Superadmin" })).toBeVisible();
+    const axe = await new AxeBuilder({ page }).analyze();
+    expect(axe.violations).toEqual([]);
+  });
+
+  test("Pause then Resume, with no confirmation: participants stay able to sign in while paused", async ({
+    page,
+  }) => {
+    await signInStaff(page, "e2e_super");
+    await page.goto("/superadmin");
+    await page.getByRole("button", { name: "Pause" }).click();
+    await expect(page.getByTestId("competition-notice")).toContainText(
+      "The competition is paused.",
+    );
+    await expect(page.getByTestId("competition-status")).toHaveText("Paused");
+    expect(await statusOf()).toBe("PAUSED");
+    await expect(page.getByRole("button", { name: "Pause" })).toHaveCount(0);
+    expect((await participantLogin()).status).toBe(200);
+
+    // a reload shows the server's state, not the page's memory
+    await page.reload();
+    await expect(page.getByTestId("competition-status")).toHaveText("Paused");
+
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(page.getByTestId("competition-notice")).toContainText(
+      "The competition is running again.",
+    );
+    await expect(page.getByTestId("competition-status")).toHaveText("Running");
+    expect(await statusOf()).toBe("RUNNING");
+  });
+
+  test("the same Idempotency-Key is applied once; a different action in the wrong state is refused", async () => {
+    const sup = await superApi();
+    const key = crypto.randomUUID();
+    const first = await statusPost(sup, "pause", key);
+    expect(first.status()).toBe(200);
+    expect((await first.json()).data).toMatchObject({ changed: true, to: "PAUSED" });
+    expect(first.headers()["idempotent-replay"]).toBeUndefined();
+    // the same key again: the stored answer comes back (marked as a replay), and nothing is applied a second time
+    const again = await statusPost(sup, "pause", key);
+    expect(again.status()).toBe(200);
+    expect(again.headers()["idempotent-replay"]).toBe("true");
+    expect((await again.json()).data).toMatchObject({ changed: true, to: "PAUSED" });
+    // PAUSED: `open` is not a transition from here
+    const bad = await statusPost(sup, "open");
+    expect(bad.status()).toBe(409);
+    expect((await bad.json()).error.code).toBe("INVALID_COMPETITION_TRANSITION");
+    expect(await statusOf()).toBe("PAUSED");
+    expect((await statusPost(sup, "resume")).status()).toBe(200);
+    expect(await statusOf()).toBe("RUNNING");
+    await sup.dispose();
+  });
+
+  test("a page that is out of date converges on the server's state: the repeated pause is a no-op, not an error", async ({
+    page,
+  }) => {
+    await signInStaff(page, "e2e_super");
+    await page.goto("/superadmin");
+    await expect(page.getByTestId("competition-status")).toHaveText("Running");
+    // somebody else pauses it behind this page's back
+    const sup = await superApi();
+    expect((await statusPost(sup, "pause")).status()).toBe(200);
+    await page.getByRole("button", { name: "Pause" }).click(); // same-state request: an idempotent no-op
+    await expect(page.getByTestId("competition-status")).toHaveText("Paused");
+    await expect(page.getByTestId("competition-error")).toHaveCount(0);
+    expect(await statusOf()).toBe("PAUSED");
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(page.getByTestId("competition-status")).toHaveText("Running");
+    await sup.dispose();
+  });
+
+  test("End asks first: Go back changes nothing; confirming ends it for good and the participant is refused", async ({
+    page,
+  }) => {
+    await signInStaff(page, "e2e_super");
+    await page.goto("/superadmin");
+    await page.getByRole("button", { name: "End competition" }).click();
+    const dialog = page.getByRole("dialog", { name: "End the competition?" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("cannot be undone");
+    await dialog.getByRole("button", { name: "Go back" }).click();
+    await expect(dialog).toBeHidden();
+    expect(await statusOf()).toBe("RUNNING");
+    await expect(page.getByTestId("competition-status")).toHaveText("Running");
+
+    await page.getByRole("button", { name: "End competition" }).click();
+    await dialog.getByRole("button", { name: "Yes, end competition" }).click();
+    await expect(page.getByTestId("competition-notice")).toContainText(
+      "The competition has ended.",
+    );
+    await expect(page.getByTestId("competition-status")).toHaveText("Ended");
+    expect(await statusOf()).toBe("ENDED");
+    // the ended state has no action that could reopen it
+    for (const name of ["Open competition", "Pause", "Resume", "End competition"]) {
+      await expect(page.getByRole("button", { name })).toHaveCount(0);
+    }
+    expect((await participantLogin()).status).toBe(423);
+    // and the API agrees
+    const sup = await superApi();
+    expect((await statusPost(sup, "open")).status()).toBe(409);
+    await sup.dispose();
+    await page.reload();
+    await expect(page.getByTestId("competition-status")).toHaveText("Ended");
   });
 });

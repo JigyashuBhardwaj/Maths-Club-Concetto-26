@@ -242,7 +242,8 @@ export function createFakeBackend(identities, now = () => Date.now()) {
         loginId: login,
         password: pw,
         status: "NOT_STARTED",
-        competition: "RUNNING",
+        // A team observes the competition's (global) status, which a renewal resets to SETUP until the Super Admin opens it.
+        competition: renewal.status(),
         coins: 500,
         adminId: caller.id,
         createdAt: now(),

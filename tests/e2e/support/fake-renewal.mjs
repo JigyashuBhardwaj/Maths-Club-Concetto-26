@@ -119,7 +119,81 @@ export function createRenewal({
     };
   }
 
+  /** app.competition_json (timestamps are not modelled by this stand-in). */
+  const competitionJson = () => ({
+    status: competition.status,
+    opened_at: null,
+    paused_at: null,
+    ended_at: null,
+    state_version: competition.stateVersion,
+  });
+
+  /** Participant logins read the status of THEIR team in this stand-in; the SQL has one global row, so every team follows it. */
+  const applyToTeams = (status) => {
+    for (const t of teams.values())
+      gameplay.controls.setCompetition({ loginId: t.loginId, status });
+  };
+
+  const TARGET = { open: "RUNNING", pause: "PAUSED", resume: "RUNNING", end: "ENDED" };
+
   const functions = {
+    /**
+     * set_competition_status (migrations 12/14): Super Admin only, idempotent per key, the same transition table, the same
+     * "already there is a no-op" and the same readiness check for `open` (a team and the 10 x 5 content).
+     */
+    set_competition_status(a) {
+      if (!Object.hasOwn(TARGET, a.p_action ?? ""))
+        throw new AppError("VALIDATION_FAILED", { fields: ["action"] });
+      const caller = superCaller(a.p_staff_id);
+      const fingerprint = `action:${a.p_action}`;
+      const replay = idemLookup(caller.id, a.p_idem_key, "set_competition_status", fingerprint);
+      if (replay) return { ...replay, replayed: true };
+
+      const from = competition.status;
+      const to = TARGET[a.p_action];
+      if (from === to) {
+        const noop = {
+          replayed: false,
+          changed: false,
+          action: a.p_action,
+          from,
+          to,
+          competition: competitionJson(),
+        };
+        idemStore(caller.id, a.p_idem_key, "set_competition_status", fingerprint, noop);
+        return noop;
+      }
+      const allowed =
+        (a.p_action === "open" && from === "SETUP") ||
+        (a.p_action === "pause" && from === "RUNNING") ||
+        (a.p_action === "resume" && from === "PAUSED") ||
+        (a.p_action === "end" && (from === "RUNNING" || from === "PAUSED"));
+      if (!allowed)
+        throw new AppError("INVALID_COMPETITION_TRANSITION", { from, action: a.p_action });
+      if (a.p_action === "open" && teams.size < 1) {
+        throw new AppError("COMPETITION_NOT_READY", {
+          teams: teams.size,
+          themes: THEMES.length,
+          questions: QUESTIONS.length,
+          themes_not_five: 0,
+        });
+      }
+      competition.status = to;
+      competition.stateVersion += 1;
+      applyToTeams(to);
+      audit.push({ type: "COMPETITION_STATUS_CHANGED", staffId: caller.id });
+      const response = {
+        replayed: false,
+        changed: true,
+        action: a.p_action,
+        from,
+        to,
+        teams_total: teams.size,
+        competition: competitionJson(),
+      };
+      idemStore(caller.id, a.p_idem_key, "set_competition_status", fingerprint, response);
+      return response;
+    },
     get_renewal_content(a) {
       superCaller(a.p_staff_id);
       return { content: contentJson(), token: token(), readiness: readiness() };
@@ -221,5 +295,5 @@ export function createRenewal({
       return { token: token() };
     },
   };
-  return { functions, controls };
+  return { functions, controls, status: () => competition.status };
 }
