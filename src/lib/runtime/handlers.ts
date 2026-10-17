@@ -28,7 +28,12 @@ export type RuntimeDeps = AuthDeps;
 
 const FAULT = () => new ApiError("SERVICE_UNAVAILABLE", "Temporarily unavailable. Please retry.");
 
-/** One database call; an error the engine raised on purpose becomes its API error, anything else a generic 503. */
+/**
+ * One database call; an error the engine raised on purpose becomes its API error, anything else a generic 503.
+ * The generic 503 hides the cause from the client, so it leaves the only safe trace in the server log: the function name, the
+ * SQLSTATE and the engine's own stable error code if it had one (never the database message, the arguments or any id).
+ * Without it a failing database function is invisible in the hosting logs.
+ */
 export async function callDb(
   db: Db,
   fn: DbFunction,
@@ -37,7 +42,17 @@ export async function callDb(
   try {
     return await db.rpc(fn, args);
   } catch (err) {
-    if (err instanceof DbError) throw dbRaisedToApiError(err.appCode, err.details);
+    if (err instanceof DbError) {
+      const apiError = dbRaisedToApiError(err.appCode, err.details);
+      if (apiError.code === "SERVICE_UNAVAILABLE") {
+        console.error("api: database call failed", {
+          fn: err.fn,
+          sqlstate: err.code,
+          appCode: err.appCode,
+        });
+      }
+      throw apiError;
+    }
     throw err;
   }
 }

@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth/cookies";
 import { generateSessionToken, hashSessionToken } from "@/lib/auth/session";
-import { DbError, type Db, type DbFunction } from "@/lib/db/adapter";
+import { DbError, toDbError, type Db, type DbFunction } from "@/lib/db/adapter";
 import {
   createCompetitionStatusHandler,
   createStartTeamHandler,
@@ -612,6 +612,64 @@ describe("POST /api/super/competition/status", () => {
     );
     expect(res.status).toBe(200);
     expect(res.headers.get("idempotent-replay")).toBe("true");
+  });
+
+  it("a database error that is not an engine error (SQLSTATE 21000 'UPDATE requires a WHERE clause') is a generic 503, and only function + SQLSTATE are logged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // What PostgREST returns when pg-safeupdate refuses a bare UPDATE inside set_competition_status: the adapter keeps
+      // only the SQLSTATE, so this is exactly the DbError the handler sees in production.
+      const unmapped = toDbError("set_competition_status", {
+        code: "21000",
+        message: "UPDATE requires a WHERE clause",
+        details: "secret detail that must never reach a client or a log",
+      });
+      expect(unmapped.appCode).toBeUndefined();
+      const { db, ops } = fakeDb(staff("SUPER_ADMIN"), () => unmapped);
+      const res = await createCompetitionStatusHandler(deps(db))(
+        post("/api/super/competition/status", { body }),
+      );
+      const text = await res.text();
+      expect(res.status).toBe(503);
+      expect(JSON.parse(text).error).toEqual({
+        code: "SERVICE_UNAVAILABLE",
+        message: "Temporarily unavailable. Please retry.",
+      });
+      expect(text).not.toMatch(/WHERE|21000|secret|set_competition_status/);
+      expect(ops()).toHaveLength(1);
+      // The log: function name and SQLSTATE, nothing else (no message, no staff id, no idempotency key).
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]).toEqual([
+        "api: database call failed",
+        { fn: "set_competition_status", sqlstate: "21000", appCode: undefined },
+      ]);
+      expect(JSON.stringify(spy.mock.calls)).not.toMatch(
+        /WHERE|secret|detail|[0-9a-f]{8}-[0-9a-f]{4}/,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("an error the engine raised on purpose is mapped without a log entry", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { db } = fakeDb(
+        staff("SUPER_ADMIN"),
+        () =>
+          new DbError("set_competition_status", "P0001", {
+            appCode: "INVALID_COMPETITION_TRANSITION",
+            details: { from: "SETUP", action: "pause" },
+          }),
+      );
+      const res = await createCompetitionStatusHandler(deps(db))(
+        post("/api/super/competition/status", { body: { action: "pause", confirm: true } }),
+      );
+      expect(res.status).toBe(409);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("reports the pause that a resume absorbed", async () => {
