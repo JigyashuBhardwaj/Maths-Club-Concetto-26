@@ -16,6 +16,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
     { label: "Create admin", node: <CreateAdminNav /> },
     { label: "Delete admins", href: "/superadmin/delete-admins" },
     { label: "Delete teams", href: "/superadmin/delete-teams" },
+    { label: "Renew the competition", href: "/superadmin/renew" },
   ];
   return (
     <AppShell role="superadmin" nav={nav} userName={principal.staff.name}>

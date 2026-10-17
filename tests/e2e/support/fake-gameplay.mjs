@@ -76,6 +76,10 @@ export const QUESTIONS = THEMES.flatMap((t) =>
     referenceAnswer: `${SECRET_PREFIX}-${t.code}${ordinal}`,
   })),
 );
+// Each backend instance edits its OWN copy of the content (a renewal replaces names, texts and rewards in place), so the
+// exported constants above stay what the build ships and two backends in one process cannot see each other's edits.
+const BASE_THEMES = THEMES;
+const BASE_QUESTIONS = QUESTIONS;
 
 /** @param {{ sessions: Map<string, any>, teams: Map<string, any>, staffById: (id: string) => any, now: () => number, AppError: typeof Error,
  *            idemLookup: Function, idemStore: Function, audit: any[] }} deps */
@@ -89,6 +93,8 @@ export function createGameplay({
   audit,
   sessions,
 }) {
+  const THEMES = BASE_THEMES.map((t) => ({ ...t }));
+  const QUESTIONS = BASE_QUESTIONS.map((q) => ({ ...q, hints: [...q.hints] }));
   /** The engine clock: real time plus whatever the test control moved it forward (deadlines are absolute). */
   let skew = 0;
   const now = () => baseNow() + skew;
@@ -1138,5 +1144,54 @@ export function createGameplay({
     },
   };
 
-  return { functions: fns, controls, clockNow: now };
+  // ---- migration 21 (renewal): what the SQL's app.renewal_readiness reads, and the editable content ------------------------
+  /**
+   * Why a team stops a renewal, or null (app.renewal_readiness): finished or not started teams do not; a RUNNING team whose
+   * overall timer ran out does not; a RUNNING team with a question ACTIVE ("actively solving") or with none ACTIVE and none
+   * PENDING_APPROVAL ("its timer is running") does; one that has submitted and awaits approval does not.
+   */
+  const renewalBlock = (t) => {
+    if (t.status !== "RUNNING") return null;
+    const g = game(t);
+    if (g.endsAt !== null && teamClock(t, now()) >= g.endsAt) return null;
+    const states = [...g.questions.values()].map((q) => q.state);
+    if (states.includes("ACTIVE")) return "ACTIVE_QUESTION";
+    if (states.includes("PENDING_APPROVAL")) return null;
+    return "TEAM_TIMER_RUNNING";
+  };
+  const pendingSubmissions = () =>
+    teamList().reduce(
+      (n, t) => n + game(t).submissions.filter((s) => s.status === "PENDING").length,
+      0,
+    );
+
+  return {
+    functions: fns,
+    controls: {
+      ...controls,
+      /** Test-only: the ids a unit test needs to call the gameplay functions of one team directly (member = slot 1). */
+      teamIds({ loginId }) {
+        const t = teams.get(String(loginId).toLowerCase());
+        if (!t) throw new AppError("unknown team");
+        return { teamId: t.id, memberId: [...t.members].sort((x, y) => x.slot - y.slot)[0].id };
+      },
+      /** Test-only: lets `ms` pass for EVERY started team (what a long wait does), keeping the shared clock where it is. */
+      ageAllTeams({ ms }) {
+        let n = 0;
+        for (const t of teamList()) {
+          const g = game(t);
+          if (g.startedAt === null) continue;
+          g.startedAt -= Number(ms);
+          g.endsAt -= Number(ms);
+          for (const q of g.questions.values()) if (q.state === "ACTIVE") q.deadline -= Number(ms);
+          n += 1;
+        }
+        return { aged: n };
+      },
+    },
+    clockNow: now,
+    content: { THEMES, QUESTIONS },
+    renewalBlock,
+    pendingSubmissions,
+  };
 }

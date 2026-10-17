@@ -21,6 +21,11 @@ export function TicketSpiral() {
   const [open, setOpen] = useState(false);
   const { state } = useGame();
   const submitted = state?.team.status === "FINAL_SUBMITTED";
+  /** The theme's name is the database's (a renewal can change it); the built-in official name only shows until the snapshot arrives. */
+  const labelOf = (ticket: Ticket): string => {
+    if (ticket.kind !== "theme") return ticket.label;
+    return state?.themes.find((t) => t.code === ticket.id)?.name ?? ticket.label;
+  };
   const unlockedCodes = new Set(
     (state?.themes ?? []).filter((t) => t.status !== "LOCKED").map((t) => t.code),
   );
@@ -53,7 +58,7 @@ export function TicketSpiral() {
               )}
               style={{ "--i": i, "--a": i * STEP_DEG } as CSSProperties}
               data-index={i}
-              title={ticket.kind === "theme" ? ticket.label : undefined}
+              title={ticket.kind === "theme" ? labelOf(ticket) : undefined}
               aria-haspopup="dialog"
               onClick={() => choose(ticket)}
             >
@@ -81,8 +86,11 @@ export function TicketSpiral() {
               <span className="ticket-stub" aria-hidden="true">
                 {ticket.kind === "final" ? "★" : ticket.id}
               </span>
-              <span className="ticket-label" data-long={ticket.label.length > 24 ? "" : undefined}>
-                {ticket.kind === "final" && submitted ? "SUBMITTED" : ticket.label}
+              <span
+                className="ticket-label"
+                data-long={labelOf(ticket).length > 24 ? "" : undefined}
+              >
+                {ticket.kind === "final" && submitted ? "SUBMITTED" : labelOf(ticket)}
               </span>
             </button>
           ))}

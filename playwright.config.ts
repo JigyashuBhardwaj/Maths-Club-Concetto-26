@@ -46,16 +46,24 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      testIgnore: /cron\.spec\.ts/,
+      testIgnore: /(cron|renew)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
-    { name: "mobile", testIgnore: /cron\.spec\.ts/, use: { ...devices["Pixel 7"] } },
+    { name: "mobile", testIgnore: /(cron|renew)\.spec\.ts/, use: { ...devices["Pixel 7"] } },
     {
       // The scheduled sweep ends every due team, so it runs alone, once, after everything else (cron.spec.ts).
       name: "sweep",
       testMatch: /cron\.spec\.ts/,
       dependencies: ["desktop", "mobile"],
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // "Renew the Competition" deletes every admin the Super Admin created and all their teams and re-opens the lifecycle, so
+      // it cannot share the stand-in with a spec that is still running: it goes last, alone (renew.spec.ts).
+      name: "renewal",
+      testMatch: /renew\.spec\.ts/,
+      dependencies: ["sweep"],
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
   ],
   webServer: [

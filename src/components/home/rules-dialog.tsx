@@ -7,8 +7,16 @@ import { OFFICIAL_RULES } from "@/lib/content/official-public";
 
 import { InfoIcon } from "./icons";
 
-/** "Rules and regulations" stat + its dialog: the eight official rules, in order, word for word. */
-export function RulesButton() {
+interface RulesButtonProps {
+  /**
+   * The rules in force, in order (the Super Admin's renewed rules, else the official ones). Omitted: the built-in official rules.
+   * `null`: they could not be read from the database, and the dialog says so instead of showing text that may be out of date.
+   */
+  rules?: readonly string[] | null;
+}
+
+/** "Rules and regulations" stat + its dialog: the rules in force, in order, word for word. */
+export function RulesButton({ rules = OFFICIAL_RULES }: RulesButtonProps) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
 
@@ -39,13 +47,19 @@ export function RulesButton() {
             Rules and Regulations
           </h2>
           <div className="dialog-scroll">
-            <ol className="rules-list">
-              {OFFICIAL_RULES.map((rule) => (
-                <li key={rule} className="rules-item">
-                  {rule}
-                </li>
-              ))}
-            </ol>
+            {rules === null ? (
+              <p className="dialog-text" role="alert">
+                The rules could not be loaded. Reload the page to try again.
+              </p>
+            ) : (
+              <ol className="rules-list">
+                {rules.map((rule, i) => (
+                  <li key={`${i}-${rule}`} className="rules-item">
+                    {rule}
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
         </div>
         <div className="dialog-actions">

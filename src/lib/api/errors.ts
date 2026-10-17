@@ -1,6 +1,6 @@
 /**
  * API error codes and their HTTP statuses (docs/API_SPEC.md §1–§2). Only the codes the implemented layers can produce
- * are listed (auth in B9, the competition runtime in B10, provisioning in B12, gameplay in B13, economy and finalization in B15, permanent deletion in B18); later patches extend the table rather than inventing codes
+ * are listed (auth in B9, the competition runtime in B10, provisioning in B12, gameplay in B13, economy and finalization in B15, permanent deletion in B18, renewing the competition in B20); later patches extend the table rather than inventing codes
  * in handlers.
  */
 export const ERROR_STATUS = {
@@ -34,6 +34,9 @@ export const ERROR_STATUS = {
   STALE_PURCHASE_COUNT: 409,
   TIME_PURCHASE_LIMIT: 409,
   DELETE_BLOCKED: 409,
+  RENEWAL_BLOCKED: 409,
+  CONTENT_CHANGED: 409,
+  RENEWAL_INCOMPLETE: 409,
   SERVICE_UNAVAILABLE: 503,
 } as const;
 
@@ -116,6 +119,11 @@ const DB_ERROR_MESSAGES: Partial<Record<ErrorCode, string>> = {
   STALE_PURCHASE_COUNT: "A teammate just bought time for this question.",
   TIME_PURCHASE_LIMIT: "That time option cannot be bought again.",
   DELETE_BLOCKED: "These records are still referenced elsewhere, so nothing was deleted.",
+  RENEWAL_BLOCKED: "The competition cannot be renewed yet. Nothing was changed.",
+  CONTENT_CHANGED:
+    "The competition content changed after you opened this page. Nothing was changed.",
+  RENEWAL_INCOMPLETE:
+    "Some admins were not created by the Superadmin, so a renewal cannot remove them. Nothing was changed.",
 };
 
 /** Only these codes may carry details, and only flat primitives: counts, state names and field names. */

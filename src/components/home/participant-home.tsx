@@ -16,14 +16,14 @@ import { TicketSpiral } from "./ticket-spiral";
  * state. The leaderboard (rank, Team ID, score of every team, plus this team's own line) is the server's ranking from
  * `GET /api/p/leaderboard`; it is view-only, and it refreshes when this team's state version changes.
  */
-export function ParticipantHome() {
+export function ParticipantHome({ rules }: { rules?: readonly string[] | null }) {
   const { state } = useGame();
   return (
     <HomeStage>
       <SignOutButton redirectTo="/login/participant" className="home-signout" />
       <div className="home-layout">
         <main className="home-main" aria-busy={state === null}>
-          <HomeHeader />
+          <HomeHeader rules={rules} />
           <TicketSpiral />
         </main>
         <Leaderboard

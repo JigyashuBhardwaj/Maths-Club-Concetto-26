@@ -9,7 +9,7 @@ import { LogoBadges } from "./logo-badges";
 import { RulesButton } from "./rules-dialog";
 
 /** The team timer and the coin balance, both from the server snapshot (the timer counts down to the server deadline). */
-export function HomeHeader() {
+export function HomeHeader({ rules }: { rules?: readonly string[] | null }) {
   const { state } = useGame();
   const now = useServerNow();
   const timeLeftSeconds = state ? teamRemainingSeconds(state, now) : null;
@@ -36,7 +36,7 @@ export function HomeHeader() {
               <span className="stat-value">{coinsLeft ?? "—"}</span>
             </span>
           </div>
-          <RulesButton />
+          <RulesButton rules={rules} />
         </div>
       </div>
     </header>

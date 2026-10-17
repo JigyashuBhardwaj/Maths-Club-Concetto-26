@@ -8,6 +8,7 @@ import type { TeamState } from "@/lib/contracts/runtime";
 import type { FullscreenDriver } from "@/lib/fullscreen/driver";
 
 import { makeFullscreenDriver } from "./fullscreen";
+import official from "../../../content/concetto26/official-content.json";
 
 /** Shared fixtures for the participant component tests: a team snapshot builder and a mocked gameplay client. */
 export const NOW = 1_760_000_000_000;
@@ -15,6 +16,11 @@ export const NOW = 1_760_000_000_000;
 export type QState = TeamState["themes"][number]["questions"][number]["state"];
 
 const CODES = "ABCDEFGHIJ";
+/**
+ * What the database holds for a theme name once the official content is applied (migration 19): the participant UI shows the name
+ * the server sends (a renewal can change it), so a fixture that stands in for the server carries the official names.
+ */
+const officialName = (code: string) => official.themes.find((t) => t.id === code)!.name;
 
 const TERMINAL = ["FINAL_SUBMITTED", "ENDED", "DISQUALIFIED"];
 
@@ -64,7 +70,7 @@ export function snapshot(
       return {
         id: i + 1,
         code,
-        name: `Name of ${code}`,
+        name: officialName(code),
         description: `Server description of theme ${code}.`,
         topics: ["algebra"],
         difficulty: "EASY" as const,

@@ -66,9 +66,9 @@ export function QuestionPage({ theme, n }: QuestionPageProps) {
   const { state, loadFailed, refresh, apply } = useGame();
   const now = useServerNow();
   const answerId = useId();
-  const titleLabel = themeName(theme);
-
   const themeView = state ? findTheme(state, theme) : undefined;
+  // The database's name (a renewal can change it); the built-in official name only until the snapshot arrives.
+  const titleLabel = themeView?.name ?? themeName(theme);
   const summary = themeView?.questions[n - 1];
   const unlocked = themeView ? isUnlocked(themeView) : false;
   const detail = useQuestionDetail(summary?.id, summary?.state);

@@ -5,7 +5,8 @@
 // so the production code path is unchanged: there is no test switch inside the application. This process implements
 // the four authentication functions of migration 11 (participant_login, staff_login, resolve_session, revoke_session)
 // and the four provisioning functions of migration 13 (create_admin, create_team, list_admin_teams; get_leaderboard moved to fake-gameplay.mjs in B16, where the score lives)
-// and the four B18 functions of migration 20 (list_deletable_admins/teams, delete_admins/teams) with the same rules and result shapes
+// and the four B18 functions of migration 20 (list_deletable_admins/teams, delete_admins/teams) with the same rules and result shapes,
+// and the three functions of migration 21 (get_renewal_content, renew_competition, get_competition_rules: see fake-renewal.mjs)
 // with the same rules and the same JSON result shapes as the SQL. The SQL itself is proven by supabase/tests/70_auth
 // and 90_provisioning (and by the real-PostgreSQL cross-check described in docs/PROVISIONING.md).
 //
@@ -20,6 +21,7 @@ import { createServer } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createGameplay } from "./fake-gameplay.mjs";
+import { createRenewal } from "./fake-renewal.mjs";
 
 const SESSION_MS = 12 * 60 * 60 * 1000;
 
@@ -57,6 +59,9 @@ export function createFakeBackend(identities, now = () => Date.now()) {
   );
   // The pre-existing teams belong to the first ADMIN of the identities (like a team an Admin created earlier).
   const firstAdmin = [...staff.values()].find((u) => u.role === "ADMIN");
+  // Every seeded ADMIN was provisioned by the seeded SUPER_ADMIN (what create_admin records as created_by).
+  const firstSuper = [...staff.values()].find((u) => u.role === "SUPER_ADMIN");
+  for (const u of staff.values()) if (u.role === "ADMIN") u.createdBy = firstSuper?.id ?? null;
   const teams = new Map(
     identities.teams.map((t) => [
       t.loginId.toLowerCase(),
@@ -456,10 +461,24 @@ export function createFakeBackend(identities, now = () => Date.now()) {
     sessions,
   });
 
+  // Migration 21: "Renew the Competition" (content, rules and the atomic renewal; deletion goes through delete_admins above).
+  const renewal = createRenewal({
+    teams,
+    staff,
+    staffById,
+    AppError,
+    idemLookup,
+    idemStore,
+    audit,
+    deleteAdmins: deletion.delete_admins,
+    gameplay,
+  });
+
   const functions = {
     ...provisioning,
     ...deletion,
     ...gameplay.functions,
+    ...renewal.functions,
     participant_login(a) {
       needHash(a.p_token_hash);
       const key = `team:${String(a.p_login_id ?? "")
@@ -565,6 +584,7 @@ export function createFakeBackend(identities, now = () => Date.now()) {
   /** Test-only controls (never reachable from the app, which only calls /rest/v1/rpc/*). */
   const controls = {
     ...gameplay.controls,
+    ...renewal.controls,
     /** Makes every live session of one account look expired (staff username or member admission number). */
     /** @param {{ username?: string, admissionNo?: string }} who */
     expire({ username, admissionNo }) {
@@ -594,6 +614,13 @@ export function createFakeBackend(identities, now = () => Date.now()) {
       const u = staff.get(String(username).toLowerCase());
       if (!u) throw new AppError("unknown staff");
       return u.id;
+    },
+    /** Marks an ADMIN as not created through the Super Admin's provisioning (an account inserted straight into the database). */
+    unattributeAdmin({ username }) {
+      const u = staff.get(String(username).toLowerCase());
+      if (!u || u.role !== "ADMIN") throw new AppError("unknown admin");
+      u.createdBy = null;
+      return { ok: true };
     },
     /** Disables / re-enables a staff account (its live sessions then stop resolving, as in resolve_session). */
     staffActive({ username, active }) {
